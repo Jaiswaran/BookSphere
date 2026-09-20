@@ -1,0 +1,79 @@
+                // File upload trigger box
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            showPublishDialog = true
+                        }
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.FileUpload,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Text(
+                            text = "Tap to open Publishing Studio",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Upload PDF manuscript, cover art, and pricing details",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                
+                if (showPublishDialog) {
+                    com.example.ui.screens.PublishBookDialog(
+                        onDismiss = { showPublishDialog = false },
+                        onPublish = { title, author, desc, genre, category, price, lang, coverUri, pdfUri, isFree, previewPages, totalPages ->
+                            viewModel.publishBook(
+                                title = title,
+                                author = author,
+                                description = desc,
+                                genre = genre,
+                                price = price,
+                                coverUrl = coverUri,
+                                pdfUri = pdfUri,
+                                language = lang,
+                                totalPages = totalPages,
+                                previewPages = previewPages,
+                                isFree = isFree
+                            )
+                            showPublishDialog = false
+                            publishSuccessMsg = "Successfully published '$title'!"
+                        }
+                    )
+                }
+
+                if (publishSuccessMsg != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                            Text(
+                                text = publishSuccessMsg ?: "",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                }
