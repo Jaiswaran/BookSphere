@@ -47,9 +47,13 @@ fun AuthorStudioScreen(
     var publishSuccessMsg by remember { mutableStateOf<String?>(null) }
 
     var showPublishDialog by remember { mutableStateOf(false) }
+    var retryWorkToPublish by remember { mutableStateOf<PublishedWork?>(null) }
 
-    val authorNet = retailPrice * 0.70f
-    val platformFee = retailPrice * 0.30f
+    val isPublishing by viewModel.isPublishing.collectAsState()
+    val publishingProgress by viewModel.publishingProgress.collectAsState()
+
+    val authorNet = com.example.model.RoyaltyConfig.calculateAuthorNet(retailPrice.toDouble()).toFloat()
+    val platformFee = com.example.model.RoyaltyConfig.calculatePlatformFee(retailPrice.toDouble()).toFloat()
 
     Column(
         modifier = Modifier
@@ -227,7 +231,7 @@ fun AuthorStudioScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "${CurrencyUtils.formatInr(stats.netRevenue)} net payout accumulated. BookSphere platform maintenance fee is only 30% (${CurrencyUtils.formatInr(stats.platformFee)}), covering zero-latency ePub/PDF global distribution and payment processing.",
+                        text = "${CurrencyUtils.formatInr(stats.netRevenue)} net payout accumulated. BookSphere platform maintenance fee is only ${com.example.model.RoyaltyConfig.PLATFORM_PERCENT.toInt()}% (${CurrencyUtils.formatInr(stats.platformFee)}), covering zero-latency ePub/PDF global distribution and payment processing.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 18.sp
@@ -310,8 +314,15 @@ fun AuthorStudioScreen(
                 if (showPublishDialog) {
                     val context = androidx.compose.ui.platform.LocalContext.current
                     com.example.ui.screens.PublishBookDialog(
-                        onDismiss = { showPublishDialog = false },
-                        onPublish = { title, author, desc, genre, category, price, lang, coverUri, pdfUri, isFree, previewPages, totalPages ->
+                        onDismiss = {
+                            if (!isPublishing) showPublishDialog = false
+                        },
+                        isPublishing = isPublishing,
+                        publishingProgress = publishingProgress,
+                        onCancelPublish = {
+                            viewModel.cancelPublishing()
+                        },
+                        onPublish = { title, author, desc, genre, category, price, lang, coverUri, pdfUri, isFree, previewPages, totalPages, existingId ->
                             viewModel.publishBook(
                                 context = context,
                                 title = title,
@@ -324,9 +335,53 @@ fun AuthorStudioScreen(
                                 coverUriStr = coverUri,
                                 pdfUriStr = pdfUri,
                                 previewPages = previewPages,
+                                existingBookId = existingId,
                                 onSuccess = {
                                     showPublishDialog = false
                                     publishSuccessMsg = "Successfully published '$title' to Supabase!"
+                                },
+                                onError = { errorMsg ->
+                                    publishSuccessMsg = errorMsg
+                                }
+                            )
+                        }
+                    )
+                }
+
+                if (retryWorkToPublish != null) {
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val workToRetry = retryWorkToPublish!!
+                    com.example.ui.screens.PublishBookDialog(
+                        onDismiss = {
+                            if (!isPublishing) retryWorkToPublish = null
+                        },
+                        isPublishing = isPublishing,
+                        publishingProgress = publishingProgress,
+                        onCancelPublish = {
+                            viewModel.cancelPublishing()
+                        },
+                        initialTitle = workToRetry.title,
+                        initialPrice = workToRetry.price,
+                        initialGenre = workToRetry.genre,
+                        initialIsFree = workToRetry.price == 0.0,
+                        existingBookId = workToRetry.id,
+                        onPublish = { title, author, desc, genre, category, price, lang, coverUri, pdfUri, isFree, previewPages, totalPages, existingId ->
+                            viewModel.publishBook(
+                                context = context,
+                                title = title,
+                                author = author,
+                                description = desc,
+                                genre = genre,
+                                language = lang,
+                                price = price,
+                                isFree = isFree,
+                                coverUriStr = coverUri,
+                                pdfUriStr = pdfUri,
+                                previewPages = previewPages,
+                                existingBookId = existingId ?: workToRetry.id,
+                                onSuccess = {
+                                    retryWorkToPublish = null
+                                    publishSuccessMsg = "Successfully republished '${workToRetry.title}'!"
                                 },
                                 onError = { errorMsg ->
                                     publishSuccessMsg = errorMsg
@@ -436,16 +491,54 @@ fun AuthorStudioScreen(
                                     )
                                 }
                             }
-                            Surface(
-                                shape = CircleShape,
-                                color = if (work.status == "Published") MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.secondaryContainer
+
+                            val isFailed = work.status.equals("FAILED", ignoreCase = true)
+                            val isPublished = work.status.equals("PUBLISHED", ignoreCase = true)
+                            val isUploading = work.status.equals("UPLOADING", ignoreCase = true)
+                            val isProcessing = work.status.equals("PROCESSING", ignoreCase = true)
+
+                            Column(
+                                horizontalAlignment = Alignment.End,
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Text(
-                                    text = work.status,
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                )
+                                Surface(
+                                    shape = CircleShape,
+                                    color = when {
+                                        isPublished -> MaterialTheme.colorScheme.surfaceContainerHigh
+                                        isFailed -> MaterialTheme.colorScheme.errorContainer
+                                        isUploading || isProcessing -> MaterialTheme.colorScheme.tertiaryContainer
+                                        else -> MaterialTheme.colorScheme.secondaryContainer
+                                    }
+                                ) {
+                                    Text(
+                                        text = when {
+                                            isPublished -> "Published"
+                                            isFailed -> "Failed"
+                                            isUploading -> "Uploading..."
+                                            isProcessing -> "Processing..."
+                                            else -> work.status
+                                        },
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                        color = when {
+                                            isFailed -> MaterialTheme.colorScheme.onErrorContainer
+                                            isUploading || isProcessing -> MaterialTheme.colorScheme.onTertiaryContainer
+                                            else -> MaterialTheme.colorScheme.primary
+                                        },
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+
+                                if (isFailed) {
+                                    OutlinedButton(
+                                        onClick = { retryWorkToPublish = work },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(12.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Retry", fontSize = 10.sp)
+                                    }
+                                }
                             }
                         }
                     }

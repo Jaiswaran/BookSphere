@@ -9,9 +9,20 @@ data class ProfileDto(
     val name: String? = null,
     val email: String? = null,
     val role: String? = "READER",
+    @SerialName("author_status") val authorStatus: String? = "NONE",
     @SerialName("photo_url") val photoUrl: String? = null,
+    val bio: String? = null,
+    @SerialName("reading_lists_json") val readingListsJson: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null
+)
+
+@Serializable
+data class ProfileUpdateDto(
+    val name: String? = null,
+    @SerialName("photo_url") val photoUrl: String? = null,
+    val bio: String? = null,
+    @SerialName("reading_lists_json") val readingListsJson: String? = null
 )
 
 @Serializable

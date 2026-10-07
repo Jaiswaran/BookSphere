@@ -9,8 +9,6 @@ import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.storage.Storage
 
 object SupabaseConfig {
-    const val DEFAULT_URL = "https://mrkxwbuhzwfnyrcjdxac.supabase.co"
-    const val DEFAULT_KEY = "sb_publishable_3fjoW1A-2MbMjywOxDenzQ_864474a0"
 
     fun sanitizeSupabaseUrl(rawUrl: String): String {
         var url = rawUrl.trim()
@@ -33,27 +31,47 @@ object SupabaseConfig {
         return url
     }
 
+    val isConfigured: Boolean
+        get() = try {
+            val url = BuildConfig.SUPABASE_URL
+            val key = BuildConfig.SUPABASE_PUBLISHABLE_KEY
+            !url.isNullOrBlank() && url != "YOUR_SUPABASE_URL" && !key.isNullOrBlank() && key != "YOUR_SUPABASE_PUBLISHABLE_KEY"
+        } catch (_: Throwable) {
+            false
+        }
+
     val supabaseUrl: String
         get() = try {
             val configUrl = BuildConfig.SUPABASE_URL
-            val raw = if (!configUrl.isNullOrBlank() && configUrl != "YOUR_SUPABASE_URL") configUrl else DEFAULT_URL
-            sanitizeSupabaseUrl(raw)
+            if (!configUrl.isNullOrBlank() && configUrl != "YOUR_SUPABASE_URL") {
+                sanitizeSupabaseUrl(configUrl)
+            } else {
+                "https://placeholder.supabase.co"
+            }
         } catch (_: Throwable) {
-            DEFAULT_URL
+            "https://placeholder.supabase.co"
         }
 
     val supabaseKey: String
         get() = try {
             val key = BuildConfig.SUPABASE_PUBLISHABLE_KEY
-            if (!key.isNullOrBlank() && key != "YOUR_SUPABASE_PUBLISHABLE_KEY") key.trim() else DEFAULT_KEY
+            if (!key.isNullOrBlank() && key != "YOUR_SUPABASE_PUBLISHABLE_KEY") {
+                key.trim()
+            } else {
+                "placeholder-publishable-key"
+            }
         } catch (_: Throwable) {
-            DEFAULT_KEY
+            "placeholder-publishable-key"
         }
 
     val client: SupabaseClient by lazy {
         val url = supabaseUrl
         val key = supabaseKey
-        Log.d("SupabaseConfig", "Initializing SupabaseClient with sanitized URL: $url")
+        if (!isConfigured) {
+            Log.w("SupabaseConfig", "Supabase publishable credentials not configured. Please supply SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in Secrets.")
+        } else {
+            Log.d("SupabaseConfig", "Initializing SupabaseClient with URL: $url")
+        }
         createSupabaseClient(
             supabaseUrl = url,
             supabaseKey = key

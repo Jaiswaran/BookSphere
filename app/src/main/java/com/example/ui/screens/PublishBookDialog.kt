@@ -44,19 +44,43 @@ import java.util.UUID
 @Composable
 fun PublishBookDialog(
     onDismiss: () -> Unit,
-    onPublish: (title: String, author: String, desc: String, genre: String, category: String, price: Double, language: String, coverUri: String, pdfUri: String, isFree: Boolean, previewPages: Int, totalPages: Int) -> Unit
+    isPublishing: Boolean = false,
+    publishingProgress: String? = null,
+    onCancelPublish: () -> Unit = {},
+    initialTitle: String = "",
+    initialAuthor: String = "",
+    initialDescription: String = "",
+    initialPrice: Double = 299.0,
+    initialGenre: String = "Fiction",
+    initialIsFree: Boolean = false,
+    existingBookId: String? = null,
+    onPublish: (
+        title: String,
+        author: String,
+        desc: String,
+        genre: String,
+        category: String,
+        price: Double,
+        language: String,
+        coverUri: String,
+        pdfUri: String,
+        isFree: Boolean,
+        previewPages: Int,
+        totalPages: Int,
+        existingBookId: String?
+    ) -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     
-    var title by remember { mutableStateOf("") }
-    var author by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var genre by remember { mutableStateOf("Fiction") }
+    var title by remember { mutableStateOf(initialTitle) }
+    var author by remember { mutableStateOf(initialAuthor) }
+    var description by remember { mutableStateOf(initialDescription) }
+    var genre by remember { mutableStateOf(initialGenre) }
     var category by remember { mutableStateOf("Literature") }
-    var priceStr by remember { mutableStateOf("299") }
+    var priceStr by remember { mutableStateOf(if (initialIsFree) "0" else initialPrice.toInt().toString()) }
     var language by remember { mutableStateOf("English") }
-    var isFree by remember { mutableStateOf(false) }
+    var isFree by remember { mutableStateOf(initialIsFree) }
     var previewPagesStr by remember { mutableStateOf("3") }
     
     val defaultCovers: List<Pair<String, String>> = remember {
@@ -86,42 +110,64 @@ fun PublishBookDialog(
         }
     }
     
-    val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+                    val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             coroutineScope.launch {
                 isProcessing = true
+                errorMessage = null
                 try {
+                    var sizeBytes = 0L
                     context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                         val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                         val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-                        cursor.moveToFirst()
-                        pdfFileName = cursor.getString(nameIndex)
-                        val sizeBytes = cursor.getLong(sizeIndex)
-                        pdfFileSize = "${(sizeBytes / (1024 * 1024)).coerceAtLeast(1)} MB"
+                        if (cursor.moveToFirst()) {
+                            if (nameIndex != -1) pdfFileName = cursor.getString(nameIndex)
+                            if (sizeIndex != -1) sizeBytes = cursor.getLong(sizeIndex)
+                            pdfFileSize = "${(sizeBytes / (1024 * 1024)).coerceAtLeast(1)} MB"
+                        }
+                    }
+
+                    // Enforce maximum file size (50MB)
+                    if (sizeBytes > 50 * 1024 * 1024) {
+                        errorMessage = "Manuscript exceeds maximum allowed size of 50 MB."
+                        return@launch
                     }
                     
-                    // Copy to internal storage
-                    val internalFile = File(context.filesDir, "${UUID.randomUUID()}.pdf")
+                    // Copy to internal cache storage
+                    val internalFile = File(context.cacheDir, "picked_manuscript_${UUID.randomUUID()}.pdf")
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         FileOutputStream(internalFile).use { output ->
                             input.copyTo(output)
                         }
+                    } ?: throw IllegalStateException("Cannot read selected file.")
+
+                    if (!internalFile.exists() || internalFile.length() == 0L) {
+                        errorMessage = "Selected PDF file is empty."
+                        return@launch
                     }
-                    pdfUri = Uri.fromFile(internalFile)
                     
-                    // Count pages if possible
+                    // Verify that the PDF is valid and has pages > 0
+                    var pageCount = 0
+                    val fd = android.os.ParcelFileDescriptor.open(internalFile, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
                     try {
-                        val fd = android.os.ParcelFileDescriptor.open(internalFile, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
                         val renderer = android.graphics.pdf.PdfRenderer(fd)
-                        pdfTotalPages = renderer.pageCount
+                        pageCount = renderer.pageCount
                         renderer.close()
+                    } finally {
                         fd.close()
-                    } catch (_: Exception) {
-                        pdfTotalPages = 150
                     }
+
+                    if (pageCount <= 0) {
+                        internalFile.delete()
+                        errorMessage = "The selected PDF has no readable pages."
+                        return@launch
+                    }
+
+                    pdfTotalPages = pageCount
+                    pdfUri = Uri.fromFile(internalFile)
                     isUsingPresetManuscript = false
                 } catch (e: Exception) {
-                    errorMessage = "Could not parse selected PDF: ${e.message}"
+                    errorMessage = "Invalid or corrupted PDF manuscript: ${e.message}"
                 } finally {
                     isProcessing = false
                 }
@@ -410,38 +456,97 @@ fun PublishBookDialog(
                 
                 Spacer(modifier = Modifier.height(14.dp))
                 
+                if (isPublishing) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Text(
+                                        text = "Publishing Manuscript...",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                                TextButton(
+                                    onClick = onCancelPublish,
+                                    colors = ButtonDefaults.textButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.error
+                                    )
+                                ) {
+                                    Text("Cancel", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = publishingProgress ?: "Processing publication stages...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
+                
                 Button(
                     onClick = {
-                        if (title.isBlank()) {
-                            errorMessage = "Please enter a book title."
-                            return@Button
-                        }
-                        if (description.isBlank()) {
-                            errorMessage = "Please enter a synopsis or description."
-                            return@Button
-                        }
                         val finalAuthor = author.ifBlank { "Independent Author" }
-                        val finalPrice = if (isFree) 0.0 else priceStr.toDoubleOrNull()
-                        if (finalPrice == null) {
-                            errorMessage = "Please enter a valid price."
+                        val finalPrice = if (isFree) 0.0 else (priceStr.toDoubleOrNull() ?: -1.0)
+                        val prevPages = previewPagesStr.toIntOrNull() ?: 3
+
+                        val metaValidation = com.example.util.PublicationValidator.validateMetadata(
+                            title = title,
+                            author = finalAuthor,
+                            description = description,
+                            genre = genre,
+                            language = language,
+                            price = finalPrice,
+                            isFree = isFree,
+                            previewPages = prevPages,
+                            totalPages = pdfTotalPages
+                        )
+
+                        if (!metaValidation.isSuccess) {
+                            errorMessage = metaValidation.errorMessage
                             return@Button
                         }
-                        val prevPages = previewPagesStr.toIntOrNull() ?: 3
+
                         val chosenCover = customCoverUri?.toString() ?: selectedCoverUrl
                         val chosenPdf = pdfUri?.toString() ?: "internal_preset_pdf"
                         
                         onPublish(
                             title, finalAuthor, description, genre, category, finalPrice, language,
-                            chosenCover, chosenPdf, isFree, prevPages, pdfTotalPages
+                            chosenCover, chosenPdf, isFree, prevPages, pdfTotalPages, existingBookId
                         )
                     },
                     modifier = Modifier.fillMaxWidth().height(52.dp),
-                    enabled = !isProcessing,
+                    enabled = !isProcessing && !isPublishing,
                     shape = CircleShape
                 ) {
                     Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Publish to BookSphere (Supabase)")
+                    Text(if (existingBookId != null) "Retry Publishing to Supabase" else "Publish to BookSphere (Supabase)")
                 }
             }
         }

@@ -2,9 +2,9 @@ package com.example
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -48,7 +48,8 @@ fun BookSphereApp(
     val authorWorks by viewModel.authorWorks.collectAsStateWithLifecycle()
     val platformMetrics by viewModel.platformMetrics.collectAsStateWithLifecycle()
 
-    // Supabase & Room Database Backed Lists
+    // Discover Data State & Backed Lists
+    val discoverDataState by viewModel.discoverDataState.collectAsStateWithLifecycle()
     val supabaseBooks by viewModel.supabaseBooks.collectAsStateWithLifecycle()
     val publishedEntities by viewModel.publishedBooks.collectAsStateWithLifecycle()
 
@@ -62,13 +63,23 @@ fun BookSphereApp(
         }
     }
 
-    val trendingBooks = remember(supabaseBooks, publishedEntities) {
-        if (supabaseBooks.isNotEmpty()) {
-            (supabaseBooks + SampleData.trendingBooks).distinctBy { it.id }
-        } else if (publishedEntities.isNotEmpty()) {
-            (publishedEntities.map { it.toBook() } + SampleData.trendingBooks).distinctBy { it.id }
-        } else {
-            SampleData.trendingBooks
+    val trendingBooks = remember(supabaseBooks, publishedEntities, discoverDataState) {
+        when (discoverDataState) {
+            is DataState.Success -> supabaseBooks
+            is DataState.Empty -> emptyList()
+            is DataState.Offline -> {
+                if (supabaseBooks.isNotEmpty()) supabaseBooks
+                else publishedEntities.map { it.toBook() }
+            }
+            is DataState.Error -> {
+                if (publishedEntities.isNotEmpty()) publishedEntities.map { it.toBook() }
+                else emptyList()
+            }
+            is DataState.Loading, is DataState.Idle -> {
+                if (supabaseBooks.isNotEmpty()) supabaseBooks
+                else if (publishedEntities.isNotEmpty()) publishedEntities.map { it.toBook() }
+                else SampleData.trendingBooks
+            }
         }
     }
 
@@ -76,10 +87,21 @@ fun BookSphereApp(
         (trendingBooks + libraryBooks + listOf(SampleData.staffPickBook, SampleData.currentVolume)).distinctBy { it.id }
     }
 
+    BackHandler(enabled = currentTab != ScreenTab.DISCOVER) {
+        when (currentTab) {
+            ScreenTab.BOOK_DETAIL -> viewModel.setTab(ScreenTab.DISCOVER)
+            ScreenTab.READER -> viewModel.setTab(ScreenTab.BOOK_DETAIL)
+            ScreenTab.PROFILE -> viewModel.setTab(ScreenTab.DISCOVER)
+            ScreenTab.AUTHOR_STUDIO -> viewModel.setTab(ScreenTab.DISCOVER)
+            ScreenTab.MY_LIBRARY -> viewModel.setTab(ScreenTab.DISCOVER)
+            else -> Unit
+        }
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
-            if (currentTab != ScreenTab.BOOK_DETAIL) {
+            if (currentTab != ScreenTab.BOOK_DETAIL && currentTab != ScreenTab.PROFILE) {
                 TopNavBar(
                     userRole = userRole,
                     currentProfile = currentProfile,
@@ -87,6 +109,7 @@ fun BookSphereApp(
                     onOpenSearch = { viewModel.setShowSearchDialog(true) },
                     onOpenAdminMetrics = { viewModel.setShowAdminMetrics(true) },
                     onOpenSignUp = { viewModel.setShowSignUpDialog(true) },
+                    onOpenProfile = { viewModel.setTab(ScreenTab.PROFILE) },
                     onLogoClick = { viewModel.setTab(ScreenTab.DISCOVER) }
                 )
             }
@@ -111,6 +134,7 @@ fun BookSphereApp(
                     DiscoverScreen(
                         staffPick = SampleData.staffPickBook,
                         trendingBooks = trendingBooks,
+                        catalogState = discoverDataState,
                         onSelectBookPreview = { book ->
                             viewModel.setPreviewBook(book)
                         },
@@ -125,6 +149,9 @@ fun BookSphereApp(
                         },
                         onStartSelling = {
                             viewModel.setTab(ScreenTab.AUTHOR_STUDIO)
+                        },
+                        onRefresh = {
+                            viewModel.loadDiscoverBooks()
                         }
                     )
                 }
@@ -146,6 +173,18 @@ fun BookSphereApp(
                         viewModel = viewModel
                     )
                 }
+                ScreenTab.PROFILE -> {
+                    UserProfileScreen(
+                        viewModel = viewModel,
+                        allBooks = allBooks,
+                        onSelectBook = { book ->
+                            viewModel.setPreviewBook(book)
+                        },
+                        onNavigateBack = {
+                            viewModel.setTab(ScreenTab.DISCOVER)
+                        }
+                    )
+                }
                 ScreenTab.BOOK_DETAIL -> {
                     BookPreviewScreen(
                         book = selectedPreviewBook,
@@ -160,10 +199,9 @@ fun BookSphereApp(
                     )
                 }
                 ScreenTab.READER -> {
-                    val isPurchased = libraryBooks.any { it.id == selectedPreviewBook.id } || selectedPreviewBook.isPurchased || selectedPreviewBook.isFree
                     ReaderScreen(
+                        viewModel = viewModel,
                         book = selectedPreviewBook,
-                        isPurchased = isPurchased,
                         onNavigateBack = { viewModel.setTab(ScreenTab.BOOK_DETAIL) },
                         onPurchase = { viewModel.openCheckout(selectedPreviewBook) }
                     )

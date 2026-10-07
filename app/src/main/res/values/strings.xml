@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">BookSphere</string>
+    <string name="profile_title">Reader Profile</string>
+    <string name="profile_bio_label">Bio &amp; Reading Philosophy</string>
+    <string name="profile_reading_lists_title">Reading Lists</string>
+    <string name="profile_take_photo">Take Profile Photo</string>
+    <string name="profile_choose_gallery">Choose From Gallery</string>
+    <string name="profile_save_changes">Save Profile</string>
 </resources>

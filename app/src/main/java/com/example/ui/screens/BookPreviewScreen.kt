@@ -362,7 +362,7 @@ fun BookPreviewScreen(
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "70% (${CurrencyUtils.formatInr(book.price * 0.70)}) goes straight to ${book.author}. Unlocks all ${book.totalPages} pages permanently.",
+                            text = "${com.example.model.RoyaltyConfig.AUTHOR_PERCENT.toInt()}% (${CurrencyUtils.formatInr(com.example.model.RoyaltyConfig.calculateAuthorNet(book.price))}) goes straight to ${book.author}. Unlocks all ${book.totalPages} pages permanently.",
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

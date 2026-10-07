@@ -20,6 +20,11 @@ data class BookEntity(
     val price: Double,
     val coverUrl: String,
     val pdfUri: String? = null,
+    val authorId: String? = null,
+    val coverPath: String? = null,
+    val manuscriptPath: String? = null,
+    val previewPath: String? = null,
+    val isFree: Boolean = false,
     val language: String = "English",
     val totalPages: Int = 280,
     val previewPages: Int = 3,
@@ -48,13 +53,19 @@ data class BookEntity(
             description = description,
             language = language,
             pdfUri = pdfUri,
+            authorId = authorId,
+            coverPath = coverPath,
+            manuscriptPath = manuscriptPath,
+            previewPath = previewPath,
             totalPages = if (parsedPages.isNotEmpty()) parsedPages.size else totalPages,
             previewPages = previewPages,
             samplePagesCount = samplePagesCount,
             contentPages = parsedPages,
             rating = rating,
+            copiesSold = copiesSold,
+            status = status,
             isPurchased = false,
-            isFree = price == 0.0
+            isFree = isFree || price == 0.0
         )
     }
 
@@ -88,14 +99,19 @@ fun Book.toBookEntity(): BookEntity {
         price = price,
         coverUrl = coverUrl,
         pdfUri = pdfUri,
+        authorId = authorId,
+        coverPath = coverPath,
+        manuscriptPath = manuscriptPath,
+        previewPath = previewPath,
+        isFree = isFree || price == 0.0,
         language = language,
         totalPages = totalPages,
         previewPages = previewPages,
         samplePagesCount = samplePagesCount,
         contentPagesJson = pagesJson,
-        status = "PUBLISHED",
-        copiesSold = 120,
-        netEarned = price * 0.70 * 120,
+        status = status,
+        copiesSold = copiesSold,
+        netEarned = com.example.model.RoyaltyConfig.calculateAuthorNet(price, copiesSold),
         rating = rating,
         publishedAt = System.currentTimeMillis()
     )
@@ -114,6 +130,8 @@ data class CachedUserProfileEntity(
     val name: String? = null,
     val role: String = "READER", // "READER" or "AUTHOR"
     val photoUrl: String? = null,
+    val bio: String? = null,
+    val readingListsJson: String = "[]",
     val isActive: Boolean = true,
     val cachedAt: Long = System.currentTimeMillis()
 )

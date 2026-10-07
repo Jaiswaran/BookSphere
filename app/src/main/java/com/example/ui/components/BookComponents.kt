@@ -78,6 +78,7 @@ fun TopNavBar(
     onOpenAdminMetrics: () -> Unit,
     onOpenSignUp: () -> Unit = {},
     onOpenStoredAccounts: () -> Unit = {},
+    onOpenProfile: () -> Unit = {},
     onLogoClick: () -> Unit
 ) {
     Surface(
@@ -187,21 +188,23 @@ fun TopNavBar(
                         }
                     }
                 }
-                // Role Switcher Badge / Avatar
+                // Reader / Profile Avatar Button
                 Surface(
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.primaryContainer,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)),
                     modifier = Modifier
                         .clip(CircleShape)
-                        .clickable { onToggleRole() }
+                        .clickable { onOpenProfile() }
                 ) {
                     Row(
                         modifier = Modifier.padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        val avatarUrl = currentProfile?.photoUrl ?: SampleData.AUTHOR_AVATAR
                         AsyncImage(
-                            model = SampleData.AUTHOR_AVATAR,
+                            model = avatarUrl,
                             contentDescription = "User Avatar",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
@@ -209,7 +212,7 @@ fun TopNavBar(
                                 .clip(CircleShape)
                         )
                         Text(
-                            text = if (userRole == UserRole.AUTHOR) "Author" else "Reader",
+                            text = "Profile",
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                             fontWeight = FontWeight.SemiBold
@@ -236,7 +239,7 @@ fun BottomNavBar(
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .height(64.dp)
-                .padding(horizontal = 8.dp),
+                .padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -254,13 +257,19 @@ fun BottomNavBar(
             )
             BottomNavItem(
                 icon = Icons.Outlined.EditNote,
-                label = "Author Studio",
+                label = "Studio",
                 isSelected = currentTab == ScreenTab.AUTHOR_STUDIO,
                 onClick = { onTabSelected(ScreenTab.AUTHOR_STUDIO) }
             )
             BottomNavItem(
+                icon = Icons.Outlined.Person,
+                label = "Profile",
+                isSelected = currentTab == ScreenTab.PROFILE,
+                onClick = { onTabSelected(ScreenTab.PROFILE) }
+            )
+            BottomNavItem(
                 icon = Icons.Outlined.MenuBook,
-                label = "Book Detail",
+                label = "Detail",
                 isSelected = currentTab == ScreenTab.BOOK_DETAIL,
                 onClick = { onTabSelected(ScreenTab.BOOK_DETAIL) }
             )
@@ -310,8 +319,8 @@ fun CheckoutDialog(
     var isProcessing by remember { mutableStateOf(false) }
     var isSuccess by remember { mutableStateOf(false) }
 
-    val authorPayout = book.price * 0.70
-    val platformFee = book.price * 0.30
+    val authorPayout = com.example.model.RoyaltyConfig.calculateAuthorNet(book.price)
+    val platformFee = com.example.model.RoyaltyConfig.calculatePlatformFee(book.price)
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -419,7 +428,7 @@ fun CheckoutDialog(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = "Author Royalty (70%):",
+                                    text = "Author Royalty (${com.example.model.RoyaltyConfig.AUTHOR_PERCENT.toInt()}%):",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -435,7 +444,7 @@ fun CheckoutDialog(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = "BookSphere Platform (30%):",
+                                    text = "BookSphere Platform (${com.example.model.RoyaltyConfig.PLATFORM_PERCENT.toInt()}%):",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
