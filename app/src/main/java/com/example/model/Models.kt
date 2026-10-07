@@ -22,6 +22,10 @@ data class Book(
     val description: String = "",
     val language: String = "English",
     val pdfUri: String? = null,
+    val authorId: String? = null,
+    val coverPath: String? = null,
+    val manuscriptPath: String? = null,
+    val previewPath: String? = null,
     val totalPages: Int = 320,
     val previewPages: Int = 3,
     val samplePagesCount: Int = 20,
@@ -29,6 +33,8 @@ data class Book(
     val contentPages: List<String> = emptyList(),
     val isPurchased: Boolean = false,
     val isFree: Boolean = price == 0.0,
+    val copiesSold: Int = 0,
+    val status: String = "PUBLISHED",
     val progress: Float? = null,
     val progressText: String? = null,
     val timeLeft: String? = null,
@@ -40,12 +46,12 @@ data class Book(
 data class AuthorStats(
     val name: String = "Elena Rostova",
     val avatarUrl: String = "https://lh3.googleusercontent.com/aida-public/AB6AXuCev1HvMLVpVmXZ55glfupYklmea-rnhzteh0q9MzTR6IgY0lxVpWvj9zZBtXGcqnoHbmcaUns3pIgz4XruTt9FdKonNT0K9NxwnNyE9uVNe3Um841VGyvmPD6cNtGriePjxSYrpltpgoAhZDeottqeMxHPM5l9qJf5zEX0M7Vybjr3TB8kO-dBBPriXYMGKOfv3ZesdLoV5QRmS1oRAyUYqRifQHzu8tXBb1G36LIoT6h9EGTJGqCt",
-    val grossSales: Double = 698800.0,
+    val grossSales: Double = 0.0,
     val growthPercent: Double = 18.4,
-    val circulationCopies: Int = 1428,
-    val royaltyRate: Double = 85.0,
-    val netRevenue: Double = 593980.0,
-    val platformFee: Double = 104820.0
+    val circulationCopies: Int = 0,
+    val royaltyRate: Double = 70.0,
+    val netRevenue: Double = 0.0,
+    val platformFee: Double = 0.0
 )
 
 data class PublishedWork(
@@ -55,7 +61,7 @@ data class PublishedWork(
     val copiesSold: Int,
     val rating: Double,
     val netEarned: Double,
-    val status: String, // "Published", "Draft / In Review"
+    val status: String, // "PUBLISHED", "DRAFT", "ARCHIVED"
     val coverUrl: String,
     val genre: String
 )
@@ -80,6 +86,14 @@ data class PlatformMetrics(
     val avgRating: Double = 4.92
 )
 
+data class UserProfile(
+    val id: String, // Supabase Auth UUID
+    val name: String,
+    val email: String,
+    val role: UserRole = UserRole.READER,
+    val photoUrl: String? = null
+)
+
 enum class ScreenTab {
     DISCOVER,
     MY_LIBRARY,
@@ -91,4 +105,10 @@ enum class ScreenTab {
 enum class UserRole {
     READER,
     AUTHOR
+}
+
+enum class BookStatus {
+    DRAFT,
+    PUBLISHED,
+    ARCHIVED
 }

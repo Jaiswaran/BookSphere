@@ -17,36 +17,10 @@ import com.example.ui.BookSphereViewModel
 import com.example.ui.components.*
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
-import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
-import android.util.Log
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        try {
-            if (FirebaseApp.getApps(this).isEmpty()) {
-                val apiKey = BuildConfig.FIREBASE_API_KEY
-                val appId = BuildConfig.FIREBASE_APP_ID
-                val projectId = BuildConfig.FIREBASE_PROJECT_ID
-                
-                if (apiKey != "YOUR_API_KEY" && apiKey.isNotBlank()) {
-                    val options = FirebaseOptions.Builder()
-                        .setApiKey(apiKey)
-                        .setApplicationId(appId)
-                        .setProjectId(projectId)
-                        .build()
-                    FirebaseApp.initializeApp(this, options)
-                    Log.d("Firebase", "Firebase initialized manually via BuildConfig")
-                } else {
-                    Log.w("Firebase", "Firebase not initialized: Missing actual keys in Secrets.")
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("Firebase", "Failed to initialize Firebase", e)
-        }
-
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
@@ -61,34 +35,41 @@ fun BookSphereApp(
     viewModel: BookSphereViewModel = viewModel()
 ) {
     val currentTab by viewModel.currentTab.collectAsStateWithLifecycle()
+    val currentProfile by viewModel.currentProfile.collectAsStateWithLifecycle()
     val userRole by viewModel.userRole.collectAsStateWithLifecycle()
     val selectedPreviewBook by viewModel.selectedPreviewBook.collectAsStateWithLifecycle()
     val checkoutBook by viewModel.checkoutBook.collectAsStateWithLifecycle()
     val showAdminMetrics by viewModel.showAdminMetrics.collectAsStateWithLifecycle()
     val showSearchDialog by viewModel.showSearchDialog.collectAsStateWithLifecycle()
     val showSignUpDialog by viewModel.showSignUpDialog.collectAsStateWithLifecycle()
-    val showStoredCredentialsDialog by viewModel.showStoredCredentialsDialog.collectAsStateWithLifecycle()
 
     val libraryBooks by viewModel.libraryBooks.collectAsStateWithLifecycle()
     val authorStats by viewModel.authorStats.collectAsStateWithLifecycle()
+    val authorWorks by viewModel.authorWorks.collectAsStateWithLifecycle()
     val platformMetrics by viewModel.platformMetrics.collectAsStateWithLifecycle()
 
-    // Room Database Backed Lists
+    // Supabase & Room Database Backed Lists
+    val supabaseBooks by viewModel.supabaseBooks.collectAsStateWithLifecycle()
     val publishedEntities by viewModel.publishedBooks.collectAsStateWithLifecycle()
-    val allCredentials by viewModel.allCredentials.collectAsStateWithLifecycle()
-    val activeCredential by viewModel.activeCredential.collectAsStateWithLifecycle()
 
-    val publishedWorks = remember(publishedEntities) {
-        if (publishedEntities.isEmpty()) {
-            SampleData.authorPublishedWorks
+    val publishedWorks = remember(authorWorks, currentProfile) {
+        if (authorWorks.isNotEmpty()) {
+            authorWorks
+        } else if (currentProfile?.role == UserRole.AUTHOR) {
+            emptyList()
         } else {
-            publishedEntities.map { it.toPublishedWork() }
+            SampleData.authorPublishedWorks
         }
     }
 
-    val trendingBooks = remember(publishedEntities) {
-        val published = publishedEntities.map { it.toBook() }
-        (published + SampleData.trendingBooks).distinctBy { it.id }
+    val trendingBooks = remember(supabaseBooks, publishedEntities) {
+        if (supabaseBooks.isNotEmpty()) {
+            (supabaseBooks + SampleData.trendingBooks).distinctBy { it.id }
+        } else if (publishedEntities.isNotEmpty()) {
+            (publishedEntities.map { it.toBook() } + SampleData.trendingBooks).distinctBy { it.id }
+        } else {
+            SampleData.trendingBooks
+        }
     }
 
     val allBooks = remember(libraryBooks, trendingBooks) {
@@ -101,11 +82,11 @@ fun BookSphereApp(
             if (currentTab != ScreenTab.BOOK_DETAIL) {
                 TopNavBar(
                     userRole = userRole,
+                    currentProfile = currentProfile,
                     onToggleRole = { viewModel.toggleRole() },
                     onOpenSearch = { viewModel.setShowSearchDialog(true) },
                     onOpenAdminMetrics = { viewModel.setShowAdminMetrics(true) },
                     onOpenSignUp = { viewModel.setShowSignUpDialog(true) },
-                    onOpenStoredAccounts = { viewModel.setShowStoredCredentialsDialog(true) },
                     onLogoClick = { viewModel.setTab(ScreenTab.DISCOVER) }
                 )
             }
@@ -134,7 +115,13 @@ fun BookSphereApp(
                             viewModel.setPreviewBook(book)
                         },
                         onBuyBook = { book ->
-                            viewModel.openCheckout(book)
+                            if (book.isFree) {
+                                viewModel.openFreeBook(book)
+                                viewModel.setPreviewBook(book)
+                                viewModel.setTab(ScreenTab.READER)
+                            } else {
+                                viewModel.openCheckout(book)
+                            }
                         },
                         onStartSelling = {
                             viewModel.setTab(ScreenTab.AUTHOR_STUDIO)
@@ -165,13 +152,15 @@ fun BookSphereApp(
                         onBack = { viewModel.setTab(ScreenTab.DISCOVER) },
                         onBuyNow = { book -> viewModel.openCheckout(book) },
                         onReadBook = { book -> 
-                            // If they are reading it, they don't necessarily buy it yet (could be free or preview).
+                            if (book.isFree) {
+                                viewModel.openFreeBook(book)
+                            }
                             viewModel.setTab(ScreenTab.READER)
                         }
                     )
                 }
                 ScreenTab.READER -> {
-                    val isPurchased = libraryBooks.any { it.id == selectedPreviewBook.id } || selectedPreviewBook.isPurchased
+                    val isPurchased = libraryBooks.any { it.id == selectedPreviewBook.id } || selectedPreviewBook.isPurchased || selectedPreviewBook.isFree
                     ReaderScreen(
                         book = selectedPreviewBook,
                         isPurchased = isPurchased,
@@ -213,44 +202,41 @@ fun BookSphereApp(
         )
     }
 
-    // Sign-Up / Social Registration Dialog with Firebase Auth Providers & Room DB
+    // Supabase Authentication Dialog
     if (showSignUpDialog) {
         SignUpDialog(
+            currentProfile = currentProfile,
             initialRole = userRole,
             onDismiss = { viewModel.setShowSignUpDialog(false) },
-            onOpenStoredAccounts = {
-                viewModel.setShowSignUpDialog(false)
-                viewModel.setShowStoredCredentialsDialog(true)
-            },
-            onStoreCredentials = { username, phone, email, pass, role, method ->
-                viewModel.storeUserCredentials(
-                    username = username,
-                    phoneNumber = phone,
+            onEmailSignUp = { name, email, pass, role ->
+                viewModel.signUpWithEmail(
+                    name = name,
                     email = email,
-                    passwordOrToken = pass,
+                    pass = pass,
                     role = role,
-                    authMethod = method
+                    onSuccess = {},
+                    onError = {}
                 )
             },
-            onRegistrationSuccess = { registeredRole, identifier, method ->
-                if (registeredRole == UserRole.AUTHOR) {
-                    viewModel.setTab(ScreenTab.AUTHOR_STUDIO)
-                } else {
-                    viewModel.setTab(ScreenTab.DISCOVER)
-                }
-                viewModel.setShowSignUpDialog(false)
+            onEmailSignIn = { email, pass ->
+                viewModel.signInWithEmail(
+                    email = email,
+                    pass = pass,
+                    onSuccess = {},
+                    onError = {}
+                )
+            },
+            onGoogleSignIn = { idToken, preferredRole ->
+                viewModel.signInWithGoogleIdToken(
+                    idToken = idToken,
+                    preferredRole = preferredRole,
+                    onSuccess = {},
+                    onError = {}
+                )
+            },
+            onSignOut = {
+                viewModel.signOut()
             }
-        )
-    }
-
-    // Room Database Credentials Vault Dialog
-    if (showStoredCredentialsDialog) {
-        StoredCredentialsDialog(
-            credentials = allCredentials,
-            activeId = activeCredential?.id,
-            onSwitchActive = { id -> viewModel.switchActiveUser(id) },
-            onDelete = { id -> viewModel.deleteStoredCredential(id) },
-            onDismiss = { viewModel.setShowStoredCredentialsDialog(false) }
         )
     }
 }

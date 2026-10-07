@@ -35,7 +35,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -44,8 +43,6 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.CustomCredential
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.GoogleAuthProvider
 import androidx.compose.ui.platform.LocalContext
 import android.util.Log
 import com.example.BuildConfig
@@ -54,7 +51,6 @@ import coil.compose.AsyncImage
 import com.example.data.SampleData
 import com.example.model.*
 import com.example.util.CurrencyUtils
-import com.example.data.local.UserCredentialEntity
 
 fun Modifier.bookSpineEffect() = this.drawWithContent {
     drawContent()
@@ -76,6 +72,7 @@ fun Modifier.bookSpineEffect() = this.drawWithContent {
 @Composable
 fun TopNavBar(
     userRole: UserRole,
+    currentProfile: UserProfile? = null,
     onToggleRole: () -> Unit,
     onOpenSearch: () -> Unit,
     onOpenAdminMetrics: () -> Unit,
@@ -146,19 +143,49 @@ fun TopNavBar(
                         tint = MaterialTheme.colorScheme.primary
                     )
                 }
-                IconButton(onClick = onOpenStoredAccounts) {
-                    Icon(
-                        imageVector = Icons.Outlined.VpnKey,
-                        contentDescription = "Credentials Vault (Room DB)",
-                        tint = MaterialTheme.colorScheme.secondary
-                    )
-                }
-                IconButton(onClick = onOpenSignUp) {
-                    Icon(
-                        imageVector = Icons.Outlined.PersonAdd,
-                        contentDescription = "Join / Register",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
+                // Supabase Account / Sign In button
+                Surface(
+                    shape = CircleShape,
+                    color = if (currentProfile != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (currentProfile != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                    ),
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable { onOpenSignUp() }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (currentProfile != null) {
+                            Icon(
+                                imageVector = Icons.Default.AccountCircle,
+                                contentDescription = "Supabase Account",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = currentProfile.name.take(10),
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        } else {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_google_logo),
+                                contentDescription = "Sign In",
+                                tint = Color.Unspecified,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Sign In",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
                 // Role Switcher Badge / Avatar
                 Surface(
@@ -838,20 +865,21 @@ fun SearchFilterDialog(
 
 @Composable
 fun SignUpDialog(
+    currentProfile: UserProfile? = null,
     initialRole: UserRole = UserRole.READER,
     onDismiss: () -> Unit,
-    onOpenStoredAccounts: () -> Unit = {},
-    onRegistrationSuccess: (userRole: UserRole, identifier: String, method: String) -> Unit,
-    onStoreCredentials: ((username: String, phone: String?, email: String?, pass: String?, role: String, method: String) -> Unit)? = null
+    onEmailSignUp: (name: String, email: String, pass: String, role: UserRole) -> Unit = { _, _, _, _ -> },
+    onEmailSignIn: (email: String, pass: String) -> Unit = { _, _ -> },
+    onGoogleSignIn: (idToken: String, preferredRole: UserRole) -> Unit = { _, _ -> },
+    onSignOut: () -> Unit = {}
 ) {
+    var isSignUpMode by remember { mutableStateOf(currentProfile == null) }
     var selectedRole by remember { mutableStateOf(initialRole) }
-    var username by remember { mutableStateOf("") }
-    var phoneNumber by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-
     var isGoogleLoading by remember { mutableStateOf(false) }
-    var isAppleLoading by remember { mutableStateOf(false) }
     var isSubmitting by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -872,7 +900,8 @@ fun SignUpDialog(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(22.dp)
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Header
                 Row(
@@ -882,14 +911,14 @@ fun SignUpDialog(
                 ) {
                     Column {
                         Text(
-                            text = "Join BookSphere",
+                            text = if (currentProfile != null) "Supabase Account" else if (isSignUpMode) "Create Account" else "Welcome Back",
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "A fair literary community for all",
+                            text = if (currentProfile != null) "Verified Supabase Auth Session" else "BookSphere Supabase Cloud",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.secondary
                         )
                     }
                     IconButton(onClick = onDismiss) {
@@ -903,91 +932,12 @@ fun SignUpDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Role Toggle (Reader vs Author)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
-                        .padding(4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(
-                                if (selectedRole == UserRole.READER) MaterialTheme.colorScheme.primary
-                                else Color.Transparent
-                            )
-                            .clickable { selectedRole = UserRole.READER }
-                            .padding(vertical = 8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Reader",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = if (selectedRole == UserRole.READER) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(
-                                if (selectedRole == UserRole.AUTHOR) MaterialTheme.colorScheme.primary
-                                else Color.Transparent
-                            )
-                            .clickable { selectedRole = UserRole.AUTHOR }
-                            .padding(vertical = 8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Author (70% Royalty)",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = if (selectedRole == UserRole.AUTHOR) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Status banner
-                if (statusMessage != null) {
-                    Surface(
-                        color = Color(0xFFE6F4EA),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = Color(0xFF137333),
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = statusMessage!!,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF137333)
-                            )
-                        }
-                    }
-                }
-
                 // Error banner
                 if (errorMessage != null) {
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
                         shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp)
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                     ) {
                         Row(
                             modifier = Modifier.padding(10.dp),
@@ -1009,140 +959,366 @@ fun SignUpDialog(
                     }
                 }
 
-                // ============================================
-                // Social Auth Buttons (Firebase Auth Providers)
-                // ============================================
-
-                // Google Sign-In with Firebase GoogleAuthProvider
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .border(1.dp, Color(0xFFDADCE0), RoundedCornerShape(12.dp))
-                        .clickable(enabled = !isGoogleLoading && !isAppleLoading && !isSubmitting) {
-                            isGoogleLoading = true
-                            errorMessage = null
-                            coroutineScope.launch {
-                                try {
-                                    val webClientId = BuildConfig.WEB_CLIENT_ID
-                                    if (webClientId == "YOUR_WEB_CLIENT_ID" || webClientId.isBlank()) {
-                                        errorMessage = "Missing Web Client ID for Google Sign-In"
-                                        isGoogleLoading = false
-                                        return@launch
-                                    }
-                                    
-                                    val credentialManager = CredentialManager.create(context)
-                                    val googleIdOption = GetGoogleIdOption.Builder()
-                                        .setFilterByAuthorizedAccounts(false)
-                                        .setServerClientId(webClientId)
-                                        .setAutoSelectEnabled(false)
-                                        .build()
-
-                                    val request = GetCredentialRequest.Builder()
-                                        .addCredentialOption(googleIdOption)
-                                        .build()
-
-                                    val result = credentialManager.getCredential(
-                                        context = context,
-                                        request = request
+                // If user is currently authenticated
+                if (currentProfile != null) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Person,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(24.dp)
                                     )
-
-                                    val credential = result.credential
-                                    if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                                        val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                                        val idToken = googleIdTokenCredential.idToken
-                                        val auth = FirebaseAuth.getInstance()
-                                        val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
-                                        
-                                        auth.signInWithCredential(firebaseCredential).await()
-                                        val currentUser = auth.currentUser
-                                        val email = currentUser?.email ?: "reader.google@example.com"
-                                        
-                                        statusMessage = "Signed in with Google (Firebase GoogleAuthProvider)"
-                                        onStoreCredentials?.invoke(
-                                            "reader.google",
-                                            null,
-                                            email,
-                                            "firebase_google_token_verified",
-                                            selectedRole.name,
-                                            "google.com"
-                                        )
-                                        kotlinx.coroutines.delay(650)
-                                        onRegistrationSuccess(selectedRole, email, "google.com")
-                                    } else {
-                                        errorMessage = "Unexpected credential type"
-                                    }
-                                } catch (e: androidx.credentials.exceptions.NoCredentialException) {
-                                    Log.w("Auth", "No credentials available on device")
-                                    errorMessage = "No Google Account found. Please add an account in Android Settings."
-                                } catch (e: Exception) {
-                                    Log.w("Auth", "Google Sign-In failed", e)
-                                    errorMessage = "Google Sign-In Failed: ${e.message}"
-                                } finally {
-                                    isGoogleLoading = false
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = currentProfile.name,
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = currentProfile.email,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (currentProfile.role == UserRole.AUTHOR) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh
+                                ) {
+                                    Text(
+                                        text = currentProfile.role.name,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                        color = if (currentProfile.role == UserRole.AUTHOR) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
                                 }
                             }
-                        },
-                    color = Color.White,
-                    shadowElevation = 1.dp
-                ) {
+
+                            Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                            Text(
+                                text = "User UUID: ${currentProfile.id.take(18)}...",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+
+                            Button(
+                                onClick = {
+                                    onSignOut()
+                                    onDismiss()
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Icon(Icons.Default.ExitToApp, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Sign Out of Supabase")
+                            }
+                        }
+                    }
+                } else {
+                    // Mode Switcher: Sign In vs Sign Up
                     Row(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                            .padding(4.dp)
                     ) {
-                        if (isGoogleLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (!isSignUpMode) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                .clickable {
+                                    isSignUpMode = false
+                                    errorMessage = null
+                                }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text(
-                                text = "Connecting with Google...",
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
-                                color = Color(0xFF3C4043)
+                                text = "Sign In",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = if (!isSignUpMode) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        } else {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_google_logo),
-                                contentDescription = "Google Logo",
-                                tint = Color.Unspecified,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSignUpMode) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                .clickable {
+                                    isSignUpMode = true
+                                    errorMessage = null
+                                }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text(
-                                text = "Continue with Google",
-                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                                color = Color(0xFF3C4043)
+                                text = "Create Account",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = if (isSignUpMode) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
-                }
 
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                Text(
-                    text = "By continuing, you agree to our Terms of Service and Privacy Policy.",
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    if (isSignUpMode) {
+                        // Role Selection: Reader vs Author
+                        Text(
+                            text = "Account Type:",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp))
+                                .padding(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (selectedRole == UserRole.READER) MaterialTheme.colorScheme.secondary else Color.Transparent)
+                                    .clickable { selectedRole = UserRole.READER }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Reader",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = if (selectedRole == UserRole.READER) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (selectedRole == UserRole.AUTHOR) MaterialTheme.colorScheme.secondary else Color.Transparent)
+                                    .clickable { selectedRole = UserRole.AUTHOR }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Author (Publish)",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = if (selectedRole == UserRole.AUTHOR) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it },
+                            label = { Text("Full Name") },
+                            leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        label = { Text("Email Address") },
+                        leadingIcon = { Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("Password") },
+                        leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        trailingIcon = {
+                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                Icon(
+                                    imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    contentDescription = "Toggle password visibility",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        },
+                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = {
+                            errorMessage = null
+                            if (email.isBlank() || password.isBlank()) {
+                                errorMessage = "Please enter email and password."
+                                return@Button
+                            }
+                            if (isSignUpMode) {
+                                if (name.isBlank()) {
+                                    errorMessage = "Please enter your name."
+                                    return@Button
+                                }
+                                onEmailSignUp(name, email, password, selectedRole)
+                            } else {
+                                onEmailSignIn(email, password)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(if (isSignUpMode) "Sign Up with Supabase" else "Sign In with Supabase")
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Divider(modifier = Modifier.weight(1f))
+                        Text(
+                            text = "  OR  ",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Divider(modifier = Modifier.weight(1f))
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Google Sign-In with CredentialManager + Supabase Auth
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(1.dp, Color(0xFFDADCE0), RoundedCornerShape(12.dp))
+                            .clickable(enabled = !isGoogleLoading) {
+                                isGoogleLoading = true
+                                errorMessage = null
+                                coroutineScope.launch {
+                                    try {
+                                        val webClientId = BuildConfig.WEB_CLIENT_ID
+                                        if (webClientId.isNotBlank() && webClientId != "YOUR_WEB_CLIENT_ID") {
+                                            val credentialManager = CredentialManager.create(context)
+                                            val googleIdOption = GetGoogleIdOption.Builder()
+                                                .setFilterByAuthorizedAccounts(false)
+                                                .setServerClientId(webClientId)
+                                                .setAutoSelectEnabled(false)
+                                                .build()
+
+                                            val request = GetCredentialRequest.Builder()
+                                                .addCredentialOption(googleIdOption)
+                                                .build()
+
+                                            val result = credentialManager.getCredential(
+                                                context = context,
+                                                request = request
+                                            )
+
+                                            val credential = result.credential
+                                            if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                                                val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                                                val idToken = googleIdTokenCredential.idToken
+                                                onGoogleSignIn(idToken, selectedRole)
+                                            }
+                                        } else {
+                                            errorMessage = "Configure WEB_CLIENT_ID in Secrets to enable Google OAuth with Supabase."
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.w("SupabaseAuth", "Google sign in error", e)
+                                        errorMessage = "Google Sign-In: ${e.message}"
+                                    } finally {
+                                        isGoogleLoading = false
+                                    }
+                                }
+                            },
+                        color = Color.White,
+                        shadowElevation = 1.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            if (isGoogleLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text("Connecting to Google...", fontSize = 12.sp)
+                            } else {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_google_logo),
+                                    contentDescription = "Google Logo",
+                                    tint = Color.Unspecified,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "Continue with Google",
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                    color = Color(0xFF3C4043)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "Supabase Auth • Real multi-user data isolation",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-fun StoredCredentialsDialog(
-    credentials: List<UserCredentialEntity>,
-    activeId: Long?,
-    onSwitchActive: (Long) -> Unit,
-    onDelete: (Long) -> Unit,
+fun ActiveSessionDialog(
+    profile: UserProfile?,
+    onSignOut: () -> Unit,
     onDismiss: () -> Unit
 ) {
     Dialog(onDismissRequest = onDismiss) {
@@ -1164,36 +1340,11 @@ fun StoredCredentialsDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "Credentials Vault",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = "Room DB: user_credentials (${credentials.size} stored)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.secondary
-                            )
-                        }
-                    }
+                    Text(
+                        text = "Supabase Session",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
                     IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                         Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
                     }
@@ -1201,163 +1352,33 @@ fun StoredCredentialsDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                if (credentials.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "No user credentials stored yet.\nSign up with Google, Apple, or Password to save.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                if (profile == null) {
+                    Text(
+                        text = "No active Supabase session.\nPlease sign in to access Author Studio or your personal Library.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 } else {
-                    LazyColumn(
-                        modifier = Modifier.heightIn(max = 360.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(credentials) { cred ->
-                            val isActive = cred.isActive || cred.id == activeId
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                                else MaterialTheme.colorScheme.surfaceContainerLow,
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.dp,
-                                    if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                                )
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(34.dp)
-                                            .background(
-                                                if (cred.authMethod == "google.com") Color(0xFFE8F0FE)
-                                                else if (cred.authMethod == "apple.com") Color(0xFFECEFF1)
-                                                else MaterialTheme.colorScheme.secondaryContainer,
-                                                CircleShape
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        when (cred.authMethod) {
-                                            "google.com" -> {
-                                                Icon(
-                                                    painter = painterResource(id = R.drawable.ic_google_logo),
-                                                    contentDescription = null,
-                                                    tint = Color.Unspecified,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                            }
-                                            "apple.com" -> {
-                                                Icon(
-                                                    painter = painterResource(id = R.drawable.ic_apple_logo),
-                                                    contentDescription = null,
-                                                    tint = Color.Black,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                            }
-                                            else -> {
-                                                Icon(
-                                                    imageVector = Icons.Default.Key,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.secondary,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            Text(
-                                                text = cred.username,
-                                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                            Surface(
-                                                shape = CircleShape,
-                                                color = if (cred.role.equals("AUTHOR", ignoreCase = true)) MaterialTheme.colorScheme.secondaryContainer
-                                                else MaterialTheme.colorScheme.surfaceContainerHigh
-                                            ) {
-                                                Text(
-                                                    text = cred.role,
-                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
-                                                    color = if (cred.role.equals("AUTHOR", ignoreCase = true)) MaterialTheme.colorScheme.onSecondaryContainer
-                                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                )
-                                            }
-                                        }
-
-                                        val detail = cred.email ?: cred.phoneNumber ?: "Password Protected"
-                                        Text(
-                                            text = "$detail • via ${cred.authMethod}",
-                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-
-                                        if (isActive) {
-                                            Text(
-                                                text = "✓ Currently Active Account",
-                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
-                                    }
-
-                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        if (!isActive) {
-                                            OutlinedButton(
-                                                onClick = { onSwitchActive(cred.id) },
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                                shape = CircleShape,
-                                                modifier = Modifier.height(30.dp)
-                                            ) {
-                                                Text("Switch", fontSize = 11.sp)
-                                            }
-                                        }
-                                        IconButton(
-                                            onClick = { onDelete(cred.id) },
-                                            modifier = Modifier.size(30.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.DeleteOutline,
-                                                contentDescription = "Delete Credential",
-                                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(text = "Name: ${profile.name}", style = MaterialTheme.typography.labelMedium)
+                        Text(text = "Email: ${profile.email}", style = MaterialTheme.typography.bodySmall)
+                        Text(text = "Role: ${profile.role.name}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        Text(text = "User UUID: ${profile.id}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                onSignOut()
+                                onDismiss()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("Sign Out")
                         }
                     }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = CircleShape
-                ) {
-                    Text("Close Vault")
                 }
             }
         }
     }
 }
+
 

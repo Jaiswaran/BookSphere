@@ -6,13 +6,13 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [BookEntity::class, UserCredentialEntity::class],
-    version = 3,
+    entities = [BookEntity::class, CachedUserProfileEntity::class],
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun bookDao(): BookDao
-    abstract fun userCredentialDao(): UserCredentialDao
+    abstract fun cachedUserProfileDao(): CachedUserProfileDao
 
     companion object {
         @Volatile

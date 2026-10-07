@@ -308,24 +308,30 @@ fun AuthorStudioScreen(
                 }
                 
                 if (showPublishDialog) {
+                    val context = androidx.compose.ui.platform.LocalContext.current
                     com.example.ui.screens.PublishBookDialog(
                         onDismiss = { showPublishDialog = false },
                         onPublish = { title, author, desc, genre, category, price, lang, coverUri, pdfUri, isFree, previewPages, totalPages ->
                             viewModel.publishBook(
+                                context = context,
                                 title = title,
                                 author = author,
                                 description = desc,
                                 genre = genre,
-                                price = price,
-                                coverUrl = coverUri,
-                                pdfUri = pdfUri,
                                 language = lang,
-                                totalPages = totalPages,
+                                price = price,
+                                isFree = isFree,
+                                coverUriStr = coverUri,
+                                pdfUriStr = pdfUri,
                                 previewPages = previewPages,
-                                isFree = isFree
+                                onSuccess = {
+                                    showPublishDialog = false
+                                    publishSuccessMsg = "Successfully published '$title' to Supabase!"
+                                },
+                                onError = { errorMsg ->
+                                    publishSuccessMsg = errorMsg
+                                }
                             )
-                            showPublishDialog = false
-                            publishSuccessMsg = "Successfully published '$title'!"
                         }
                     )
                 }

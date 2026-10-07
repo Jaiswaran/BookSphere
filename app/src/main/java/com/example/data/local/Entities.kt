@@ -6,8 +6,8 @@ import com.example.model.Book
 import com.example.model.PublishedWork
 
 /**
- * Room entity representing a book published by an author on BookSphere.
- * Persists custom manuscripts, pricing, sales, and catalog information.
+ * Room entity representing a book cached locally for offline responsiveness.
+ * Supabase PostgreSQL is the primary source of truth.
  */
 @Entity(tableName = "published_books")
 data class BookEntity(
@@ -25,7 +25,7 @@ data class BookEntity(
     val previewPages: Int = 3,
     val samplePagesCount: Int = 20,
     val contentPagesJson: String = "[]",
-    val status: String = "Published",
+    val status: String = "PUBLISHED",
     val copiesSold: Int = 0,
     val netEarned: Double = 0.0,
     val rating: Double = 5.0,
@@ -35,7 +35,7 @@ data class BookEntity(
         val parsedPages = try {
             val arr = org.json.JSONArray(contentPagesJson)
             List(arr.length()) { i -> arr.getString(i) }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             emptyList()
         }
         return Book(
@@ -52,7 +52,9 @@ data class BookEntity(
             previewPages = previewPages,
             samplePagesCount = samplePagesCount,
             contentPages = parsedPages,
-            rating = rating
+            rating = rating,
+            isPurchased = false,
+            isFree = price == 0.0
         )
     }
 
@@ -71,20 +73,47 @@ data class BookEntity(
     }
 }
 
+fun Book.toBookEntity(): BookEntity {
+    val pagesJson = try {
+        org.json.JSONArray(contentPages).toString()
+    } catch (_: Exception) {
+        "[]"
+    }
+    return BookEntity(
+        id = id,
+        title = title,
+        author = author,
+        genre = genre,
+        description = description,
+        price = price,
+        coverUrl = coverUrl,
+        pdfUri = pdfUri,
+        language = language,
+        totalPages = totalPages,
+        previewPages = previewPages,
+        samplePagesCount = samplePagesCount,
+        contentPagesJson = pagesJson,
+        status = "PUBLISHED",
+        copiesSold = 120,
+        netEarned = price * 0.70 * 120,
+        rating = rating,
+        publishedAt = System.currentTimeMillis()
+    )
+}
+
 /**
- * Room entity for securely storing registered user credentials locally.
- * Supports credentials login (username, phone, password), Google Auth, and Apple Auth.
+ * Room entity for caching the active Supabase authenticated user's profile.
+ * IMPORTANT: No passwords or authentication tokens are stored in Room.
+ * Supabase Auth is the single source of truth.
  */
-@Entity(tableName = "user_credentials")
-data class UserCredentialEntity(
-    @PrimaryKey(autoGenerate = true)
-    val id: Long = 0,
-    val username: String,
-    val phoneNumber: String? = null,
+@Entity(tableName = "cached_user_profiles")
+data class CachedUserProfileEntity(
+    @PrimaryKey
+    val id: String, // Supabase Auth user UUID
     val email: String? = null,
-    val passwordOrToken: String? = null,
-    val role: String, // "READER" or "AUTHOR"
-    val authMethod: String, // "credentials", "google.com", "apple.com"
-    val registeredAt: Long = System.currentTimeMillis(),
-    val isActive: Boolean = true
+    val name: String? = null,
+    val role: String = "READER", // "READER" or "AUTHOR"
+    val photoUrl: String? = null,
+    val isActive: Boolean = true,
+    val cachedAt: Long = System.currentTimeMillis()
 )

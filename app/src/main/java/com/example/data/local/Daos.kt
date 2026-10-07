@@ -20,30 +20,27 @@ interface BookDao {
     @Query("DELETE FROM published_books WHERE id = :id")
     suspend fun deleteBook(id: String)
 
+    @Query("DELETE FROM published_books")
+    suspend fun clearAll()
+
     @Query("SELECT COUNT(*) FROM published_books")
     suspend fun getBookCount(): Int
 }
 
 @Dao
-interface UserCredentialDao {
-    @Query("SELECT * FROM user_credentials ORDER BY registeredAt DESC")
-    fun getAllCredentials(): Flow<List<UserCredentialEntity>>
-
-    @Query("SELECT * FROM user_credentials WHERE isActive = 1 ORDER BY registeredAt DESC LIMIT 1")
-    fun getActiveCredential(): Flow<UserCredentialEntity?>
+interface CachedUserProfileDao {
+    @Query("SELECT * FROM cached_user_profiles WHERE isActive = 1 LIMIT 1")
+    fun getActiveProfile(): Flow<CachedUserProfileEntity?>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertCredential(credential: UserCredentialEntity): Long
+    suspend fun insertProfile(profile: CachedUserProfileEntity)
 
-    @Query("UPDATE user_credentials SET isActive = 0")
-    suspend fun deactivateAll()
+    @Query("UPDATE cached_user_profiles SET isActive = 0")
+    suspend fun clearActive()
 
-    @Query("UPDATE user_credentials SET isActive = 1 WHERE id = :id")
-    suspend fun activateUser(id: Long)
+    @Query("DELETE FROM cached_user_profiles WHERE id = :id")
+    suspend fun deleteProfile(id: String)
 
-    @Query("DELETE FROM user_credentials WHERE id = :id")
-    suspend fun deleteCredential(id: Long)
-
-    @Query("SELECT COUNT(*) FROM user_credentials")
-    suspend fun getCredentialCount(): Int
+    @Query("DELETE FROM cached_user_profiles")
+    suspend fun clearAll()
 }
