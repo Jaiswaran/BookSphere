@@ -39,6 +39,7 @@ import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -227,37 +228,51 @@ class BookSphereRepository(
         role: UserRole
     ): Result<UserProfile> = withContext(Dispatchers.IO) {
         runCatching {
-            AppLogger.d("BookSphereRepo", "Initiating signup with Supabase: role=${role.name}")
+            val normalizedEmail = email.trim()
+            val normalizedName = name.trim().ifBlank { normalizedEmail.substringBefore("@") }
+            val roleName = if (role == UserRole.AUTHOR) "AUTHOR" else "READER"
+            AppLogger.d("BookSphereRepo", "Initiating signup with Supabase: role=$roleName, email=$normalizedEmail")
+
             supabase.auth.signUpWith(Email) {
-                this.email = email.trim()
+                this.email = normalizedEmail
                 this.password = pass
                 this.data = buildJsonObject {
-                    put("name", name.trim())
-                    put("role", role.name)
+                    put("name", normalizedName)
+                    put("role", roleName)
                 }
             }
 
+            val session = supabase.auth.currentSessionOrNull()
             val user = supabase.auth.currentUserOrNull()
-            if (user == null) {
-                throw IllegalStateException("Confirmation link sent to $email. Please check your inbox and verify your email to log in.")
+
+            if (session == null || user == null) {
+                // Email confirmation is required by Supabase Auth configuration
+                throw IllegalStateException("Confirmation link sent to $normalizedEmail. Please check your inbox and verify your email to log in.")
             }
 
-            val userId = user.id
-            val profile = UserProfile(
-                id = userId,
-                name = name.ifBlank { email.substringBefore("@") },
-                email = email,
+            // Session exists immediately (e.g. email confirmation disabled or auto-confirmed)
+            // Load the existing profile created by the database trigger (handle_new_user)
+            var profile: UserProfile? = null
+            for (attempt in 1..5) {
+                try {
+                    profile = loadProfileFromPostgres(user.id)
+                    if (profile != null) break
+                } catch (e: Exception) {
+                    AppLogger.w("BookSphereRepo", "Attempt $attempt loading profile after signup: ${e.message}")
+                }
+                delay(200L * attempt)
+            }
+
+            val finalProfile = profile ?: UserProfile(
+                id = user.id,
+                name = normalizedName,
+                email = user.email ?: normalizedEmail,
                 role = role
             )
 
-            // Ensure profile record in public.profiles table
-            ensureProfileInPostgres(profile)
-
-            // Cache profile locally in Room
-            cacheProfileLocally(profile)
-
-            _currentProfile.value = profile
-            profile
+            cacheProfileLocally(finalProfile)
+            _currentProfile.value = finalProfile
+            finalProfile
         }
     }
 
@@ -266,33 +281,44 @@ class BookSphereRepository(
         pass: String
     ): Result<UserProfile> = withContext(Dispatchers.IO) {
         runCatching {
-            AppLogger.d("BookSphereRepo", "Signing in with email")
+            val normalizedEmail = email.trim()
+            AppLogger.d("BookSphereRepo", "Signing in with email: $normalizedEmail")
             supabase.auth.signInWith(Email) {
-                this.email = email.trim()
+                this.email = normalizedEmail
                 this.password = pass
             }
 
             val user = supabase.auth.currentUserOrNull()
                 ?: throw IllegalStateException("Authentication succeeded but no active session found.")
 
-            val profile = refreshCurrentUserProfile() ?: run {
+            var profile: UserProfile? = null
+            for (attempt in 1..3) {
+                try {
+                    profile = loadProfileFromPostgres(user.id)
+                    if (profile != null) break
+                } catch (e: Exception) {
+                    AppLogger.w("BookSphereRepo", "Attempt $attempt loading profile: ${e.message}")
+                }
+                delay(150L * attempt)
+            }
+
+            val finalProfile = profile ?: run {
                 val roleStr = user.userMetadata?.get("role")?.toString()?.trim('"') ?: "READER"
                 val role = if (roleStr.equals("AUTHOR", ignoreCase = true)) UserRole.AUTHOR else UserRole.READER
                 val displayName = user.userMetadata?.get("name")?.toString()?.trim('"')
                     ?: user.userMetadata?.get("full_name")?.toString()?.trim('"')
-                    ?: email.substringBefore("@")
-                val fallbackProfile = UserProfile(
+                    ?: normalizedEmail.substringBefore("@")
+                UserProfile(
                     id = user.id,
                     name = displayName,
-                    email = user.email ?: email,
+                    email = user.email ?: normalizedEmail,
                     role = role
                 )
-                ensureProfileInPostgres(fallbackProfile)
-                cacheProfileLocally(fallbackProfile)
-                _currentProfile.value = fallbackProfile
-                fallbackProfile
             }
-            profile
+
+            cacheProfileLocally(finalProfile)
+            _currentProfile.value = finalProfile
+            finalProfile
         }
     }
 
@@ -310,31 +336,36 @@ class BookSphereRepository(
             val user = supabase.auth.currentUserOrNull()
                 ?: throw IllegalStateException("Supabase Google authentication failed")
 
-            val loadedProfile = loadProfileFromPostgres(user.id)
-            val profile = if (loadedProfile != null) {
-                loadedProfile
-            } else {
-                val newProfile = UserProfile(
-                    id = user.id,
-                    name = user.userMetadata?.get("full_name")?.toString()?.trim('"')
-                        ?: user.email?.substringBefore("@") ?: "Google Reader",
-                    email = user.email ?: "",
-                    role = preferredRole,
-                    photoUrl = user.userMetadata?.get("avatar_url")?.toString()?.trim('"')
-                )
-                ensureProfileInPostgres(newProfile)
-                newProfile
+            var profile: UserProfile? = null
+            for (attempt in 1..3) {
+                try {
+                    profile = loadProfileFromPostgres(user.id)
+                    if (profile != null) break
+                } catch (e: Exception) {
+                    AppLogger.w("BookSphereRepo", "Attempt $attempt loading Google user profile: ${e.message}")
+                }
+                delay(150L * attempt)
             }
 
-            cacheProfileLocally(profile)
-            _currentProfile.value = profile
-            profile
+            val finalProfile = profile ?: UserProfile(
+                id = user.id,
+                name = user.userMetadata?.get("full_name")?.toString()?.trim('"')
+                    ?: user.email?.substringBefore("@") ?: "Google Reader",
+                email = user.email ?: "",
+                role = preferredRole,
+                photoUrl = user.userMetadata?.get("avatar_url")?.toString()?.trim('"')
+            )
+
+            cacheProfileLocally(finalProfile)
+            _currentProfile.value = finalProfile
+            finalProfile
         }
     }
 
     suspend fun signOut() = withContext(Dispatchers.IO) {
         try {
             supabase.auth.signOut()
+            AppLogger.d("BookSphereRepo", "Successfully signed out of Supabase Auth")
         } catch (e: Exception) {
             AppLogger.w("BookSphereRepo", "Error signing out: ${e.message}")
         }
@@ -351,14 +382,12 @@ class BookSphereRepository(
                 val name = user.userMetadata?.get("name")?.toString()?.trim('"')
                     ?: user.userMetadata?.get("full_name")?.toString()?.trim('"')
                     ?: user.email?.substringBefore("@") ?: "Reader"
-                val fallbackProfile = UserProfile(
+                UserProfile(
                     id = user.id,
                     name = name,
                     email = user.email ?: "",
                     role = role
                 )
-                ensureProfileInPostgres(fallbackProfile)
-                fallbackProfile
             }
             cacheProfileLocally(profile)
             _currentProfile.value = profile
@@ -444,52 +473,35 @@ class BookSphereRepository(
     }
 
     private suspend fun loadProfileFromPostgres(userId: String): UserProfile? {
-        return try {
-            val dto = supabase.from("profiles")
+        val dto = try {
+            supabase.from("profiles")
                 .select {
                     filter {
                         eq("id", userId)
                     }
                 }
                 .decodeSingleOrNull<ProfileDto>()
-
-            dto?.let {
-                val parsedLists = parseReadingListsJson(it.readingListsJson)
-                val isAuthorRole = it.role.equals("AUTHOR", ignoreCase = true) ||
-                        it.role.equals("AUTHOR_VERIFIED", ignoreCase = true) ||
-                        it.role.equals("ADMIN", ignoreCase = true) ||
-                        it.authorStatus.equals("VERIFIED", ignoreCase = true)
-                UserProfile(
-                    id = it.id,
-                    name = it.name ?: it.email?.substringBefore("@") ?: "User",
-                    email = it.email ?: "",
-                    role = if (isAuthorRole) UserRole.AUTHOR else UserRole.READER,
-                    photoUrl = it.photoUrl,
-                    bio = it.bio ?: "Passionate literary enthusiast, avid reader of speculative fiction & philosophy.",
-                    readingLists = if (parsedLists.isNotEmpty()) parsedLists else createDefaultReadingLists()
-                )
-            }
         } catch (e: Exception) {
-            AppLogger.w("BookSphereRepo", "Error querying public.profiles: ${e.message}")
-            null
+            AppLogger.e("BookSphereRepo", "Error querying public.profiles for user $userId: ${e.message}", e)
+            throw e
         }
-    }
 
-    private suspend fun ensureProfileInPostgres(profile: UserProfile) {
-        try {
-            val dto = ProfileDto(
-                id = profile.id,
-                name = profile.name,
-                email = profile.email,
-                role = if (profile.role == UserRole.AUTHOR) "AUTHOR" else "READER",
-                photoUrl = profile.photoUrl,
-                bio = profile.bio,
-                readingListsJson = readingListsToJson(profile.readingLists)
+        return dto?.let {
+            val cached = profileDao.getActiveProfile().firstOrNull()
+            val cachedBio = if (cached?.id == userId) cached.bio else null
+            val cachedLists = if (cached?.id == userId) parseReadingListsJson(cached.readingListsJson) else emptyList()
+
+            val isAuthorRole = it.role.equals("AUTHOR", ignoreCase = true) ||
+                    it.role.equals("ADMIN", ignoreCase = true)
+            UserProfile(
+                id = it.id,
+                name = it.name ?: it.email?.substringBefore("@") ?: "User",
+                email = it.email ?: "",
+                role = if (isAuthorRole) UserRole.AUTHOR else UserRole.READER,
+                photoUrl = it.photoUrl,
+                bio = cachedBio ?: "Passionate literary enthusiast, avid reader of speculative fiction & philosophy.",
+                readingLists = if (cachedLists.isNotEmpty()) cachedLists else createDefaultReadingLists()
             )
-            supabase.from("profiles").upsert(dto)
-            AppLogger.d("BookSphereRepo", "Synced profile for ${profile.id} to public.profiles via upsert")
-        } catch (e: Exception) {
-            AppLogger.w("BookSphereRepo", "Failed to upsert public.profiles: ${e.message}")
         }
     }
 
@@ -559,9 +571,27 @@ class BookSphereRepository(
                 readingLists = readingLists
             )
             cacheProfileLocally(updated)
-            if (supabase.auth.currentUserOrNull() != null) {
-                ensureProfileInPostgres(updated)
+
+            val authUser = supabase.auth.currentUserOrNull()
+            if (authUser != null) {
+                try {
+                    supabase.from("profiles").update(
+                        ProfileUpdateDto(
+                            name = updated.name,
+                            photoUrl = updated.photoUrl,
+                            updatedAt = java.time.Instant.now().toString()
+                        )
+                    ) {
+                        filter {
+                            eq("id", authUser.id)
+                        }
+                    }
+                    AppLogger.d("BookSphereRepo", "Updated public.profiles for user ${authUser.id}")
+                } catch (e: Exception) {
+                    AppLogger.w("BookSphereRepo", "Failed to update profile in public.profiles: ${e.message}")
+                }
             }
+
             _currentProfile.value = updated
             updated
         }
