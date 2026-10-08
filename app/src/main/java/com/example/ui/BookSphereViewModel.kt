@@ -128,6 +128,7 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             repository.initializeAuthObserver()
         }
+        repository.startSessionStatusObserver(viewModelScope)
 
         // Initial load of published books
         loadDiscoverBooks()
@@ -694,7 +695,7 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
             _readerUiState.value = ReaderUiState.Loading("Checking book entitlement...")
             try {
                 val profile = currentProfile.value
-                val access = repository.resolveBookAccess(book, profile?.id)
+                val access = repository.resolveBookAccess(book, profile?.id, getApplication())
 
                 when (val target = access.target) {
                     is BookAccessTarget.RemoteStorageUrl -> {

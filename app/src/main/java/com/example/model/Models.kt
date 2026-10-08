@@ -59,10 +59,10 @@ data class Book(
 )
 
 object RoyaltyConfig {
-    const val AUTHOR_PERCENT = 85.0
-    const val PLATFORM_PERCENT = 15.0
-    const val AUTHOR_RATE = 0.85
-    const val PLATFORM_RATE = 0.15
+    const val AUTHOR_PERCENT = 70.0
+    const val PLATFORM_PERCENT = 30.0
+    const val AUTHOR_RATE = 0.70
+    const val PLATFORM_RATE = 0.30
 
     fun calculateAuthorNet(price: Double, copiesSold: Int = 1): Double =
         price * AUTHOR_RATE * copiesSold

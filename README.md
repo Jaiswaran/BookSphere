@@ -6,9 +6,9 @@
 
 ## 1. Executive Summary & Business Model Canvas
 
-**BookSphere** challenges traditional publishing duopolies (where authors receive as little as 30% to 70% royalties and face opaque distribution penalties). BookSphere operates on a **85/15 Fair Equity Model**:
-- **85% Net Royalty** flows directly into the author's vault with real-time payout transparency.
-- **15% Flat Platform Fee** covers global low-latency CDN streaming, DRM-free storage, Stripe payment processing, and catalog indexing.
+**BookSphere** challenges traditional publishing duopolies (where authors receive as little as 30% to 50% royalties and face opaque distribution penalties). BookSphere operates on a **70/30 Fair Equity Model**:
+- **70% Net Royalty** flows directly into the author's vault with real-time payout transparency.
+- **30% Flat Platform Fee** covers global low-latency CDN streaming, DRM-free storage, Stripe payment processing, and catalog indexing.
 - **"Try Before You Buy" Tactical Realistic Preview**: Readers freely stream the first 2-3 pages of any manuscript in an authentic, beautifully typeset dual-page book reader before deciding to purchase.
 
 ### Target Audience & User Personas
@@ -36,7 +36,7 @@
 [ BookSphere API Gateway / Node.js & NestJS ]
     ├── Auth & Role Service (JWT, Authors vs Readers)
     ├── Catalog & Search Service (PostgreSQL + Full-Text Search)
-    ├── Fair Royalties Engine (85/15 automated Stripe Connect splits)
+    ├── Fair Royalties Engine (70/30 automated Stripe Connect splits)
     └── Streaming Manuscript Engine (AWS S3 Signed Partial Streams)
 ```
 
@@ -46,7 +46,7 @@
    - Upon purchase confirmation via Stripe Webhook, a signed temporary download URL and persistent library token are generated.
 
 2. **Fair Payout Engine (Stripe Connect)**:
-   - Every transaction transparently calculates `author_share = price * 0.85` and `platform_fee = price * 0.15`.
+   - Every transaction transparently calculates `author_share = price * 0.70` and `platform_fee = price * 0.30`.
    - Payouts are deposited directly to the author's connected bank account.
 
 ---
@@ -100,8 +100,8 @@ CREATE TABLE orders (
     reader_id UUID NOT NULL REFERENCES users(id),
     book_id UUID NOT NULL REFERENCES books(id),
     amount NUMERIC(6, 2) NOT NULL,
-    author_payout NUMERIC(6, 2) NOT NULL, -- 85%
-    platform_fee NUMERIC(6, 2) NOT NULL,  -- 15%
+    author_payout NUMERIC(6, 2) NOT NULL, -- 70%
+    platform_fee NUMERIC(6, 2) NOT NULL,  -- 30%
     stripe_payment_intent_id VARCHAR(120),
     status VARCHAR(30) DEFAULT 'COMPLETED',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

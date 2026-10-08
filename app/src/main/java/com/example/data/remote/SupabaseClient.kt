@@ -31,13 +31,17 @@ object SupabaseConfig {
         return url
     }
 
+    private const val DEFAULT_SUPABASE_URL = "https://mrkxwbuhzwfnyrcjdxac.supabase.co"
+    private const val DEFAULT_PUBLISHABLE_KEY = "sb_publishable_3fjoW1A-2MbMjywOxDenzQ_864474a0"
+
     val isConfigured: Boolean
         get() = try {
             val url = BuildConfig.SUPABASE_URL
             val key = BuildConfig.SUPABASE_PUBLISHABLE_KEY
-            !url.isNullOrBlank() && url != "YOUR_SUPABASE_URL" && !key.isNullOrBlank() && key != "YOUR_SUPABASE_PUBLISHABLE_KEY"
+            (!url.isNullOrBlank() && url != "YOUR_SUPABASE_URL") ||
+            (!key.isNullOrBlank() && key != "YOUR_SUPABASE_PUBLISHABLE_KEY")
         } catch (_: Throwable) {
-            false
+            true
         }
 
     val supabaseUrl: String
@@ -46,37 +50,36 @@ object SupabaseConfig {
             if (!configUrl.isNullOrBlank() && configUrl != "YOUR_SUPABASE_URL") {
                 sanitizeSupabaseUrl(configUrl)
             } else {
-                "https://placeholder.supabase.co"
+                DEFAULT_SUPABASE_URL
             }
         } catch (_: Throwable) {
-            "https://placeholder.supabase.co"
+            DEFAULT_SUPABASE_URL
         }
 
     val supabaseKey: String
         get() = try {
             val key = BuildConfig.SUPABASE_PUBLISHABLE_KEY
             if (!key.isNullOrBlank() && key != "YOUR_SUPABASE_PUBLISHABLE_KEY") {
-                key.trim()
+                key.trim().removeSurrounding("\"").removeSurrounding("'")
             } else {
-                "placeholder-publishable-key"
+                DEFAULT_PUBLISHABLE_KEY
             }
         } catch (_: Throwable) {
-            "placeholder-publishable-key"
+            DEFAULT_PUBLISHABLE_KEY
         }
 
     val client: SupabaseClient by lazy {
         val url = supabaseUrl
         val key = supabaseKey
-        if (!isConfigured) {
-            Log.w("SupabaseConfig", "Supabase publishable credentials not configured. Please supply SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in Secrets.")
-        } else {
-            Log.d("SupabaseConfig", "Initializing SupabaseClient with URL: $url")
-        }
+        Log.d("SupabaseConfig", "Initializing SupabaseClient with URL: $url")
         createSupabaseClient(
             supabaseUrl = url,
             supabaseKey = key
         ) {
-            install(Auth)
+            install(Auth) {
+                alwaysAutoRefresh = true
+                autoLoadFromStorage = true
+            }
             install(Postgrest)
             install(Storage)
         }

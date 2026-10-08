@@ -21,11 +21,13 @@ import com.example.model.DataState
 import com.example.model.PublicationStage
 import com.example.model.ReadingList
 import com.example.model.ResolvedBookAccess
+import com.example.model.SamplePage
 import com.example.model.UserProfile
 import com.example.model.UserRole
 import com.example.util.AppError
 import com.example.util.AppLogger
 import com.example.util.PublicationValidator
+import com.example.util.SamplePdfHelper
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.Google
@@ -35,9 +37,11 @@ import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.storage.storage
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import kotlinx.serialization.json.buildJsonObject
@@ -83,6 +87,31 @@ class BookSphereRepository(
             }
         } catch (e: Exception) {
             AppLogger.w("BookSphereRepo", "Auth initialization warning: ${e.message}")
+        }
+    }
+
+    fun startSessionStatusObserver(scope: CoroutineScope) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                supabase.auth.sessionStatus.collect { status ->
+                    when (status) {
+                        is SessionStatus.Authenticated -> {
+                            AppLogger.d("BookSphereRepo", "Supabase session authenticated: ${status.session.user?.id}")
+                            refreshCurrentUserProfile()
+                        }
+                        is SessionStatus.NotAuthenticated -> {
+                            if (status.isSignOut) {
+                                AppLogger.d("BookSphereRepo", "Supabase signed out")
+                                profileDao.clearActive()
+                                _currentProfile.value = null
+                            }
+                        }
+                        else -> {}
+                    }
+                }
+            } catch (e: Exception) {
+                AppLogger.w("BookSphereRepo", "SessionStatus observer error: ${e.message}")
+            }
         }
     }
 
@@ -209,7 +238,9 @@ class BookSphereRepository(
             }
 
             val user = supabase.auth.currentUserOrNull()
-                ?: throw IllegalStateException("Signup submitted. If email confirmation is enabled, please verify your email.")
+            if (user == null) {
+                throw IllegalStateException("Confirmation link sent to $email. Please check your inbox and verify your email to log in.")
+            }
 
             val userId = user.id
             val profile = UserProfile(
@@ -241,8 +272,26 @@ class BookSphereRepository(
                 this.password = pass
             }
 
-            val profile = refreshCurrentUserProfile()
-                ?: throw IllegalStateException("Could not load user profile after sign-in")
+            val user = supabase.auth.currentUserOrNull()
+                ?: throw IllegalStateException("Authentication succeeded but no active session found.")
+
+            val profile = refreshCurrentUserProfile() ?: run {
+                val roleStr = user.userMetadata?.get("role")?.toString()?.trim('"') ?: "READER"
+                val role = if (roleStr.equals("AUTHOR", ignoreCase = true)) UserRole.AUTHOR else UserRole.READER
+                val displayName = user.userMetadata?.get("name")?.toString()?.trim('"')
+                    ?: user.userMetadata?.get("full_name")?.toString()?.trim('"')
+                    ?: email.substringBefore("@")
+                val fallbackProfile = UserProfile(
+                    id = user.id,
+                    name = displayName,
+                    email = user.email ?: email,
+                    role = role
+                )
+                ensureProfileInPostgres(fallbackProfile)
+                cacheProfileLocally(fallbackProfile)
+                _currentProfile.value = fallbackProfile
+                fallbackProfile
+            }
             profile
         }
     }
@@ -428,20 +477,19 @@ class BookSphereRepository(
 
     private suspend fun ensureProfileInPostgres(profile: UserProfile) {
         try {
-            val dto = ProfileUpdateDto(
+            val dto = ProfileDto(
+                id = profile.id,
                 name = profile.name,
+                email = profile.email,
+                role = if (profile.role == UserRole.AUTHOR) "AUTHOR" else "READER",
                 photoUrl = profile.photoUrl,
                 bio = profile.bio,
                 readingListsJson = readingListsToJson(profile.readingLists)
             )
-            supabase.from("profiles").update(dto) {
-                filter {
-                    eq("id", profile.id)
-                }
-            }
-            AppLogger.d("BookSphereRepo", "Synced profile for ${profile.id} to public.profiles")
+            supabase.from("profiles").upsert(dto)
+            AppLogger.d("BookSphereRepo", "Synced profile for ${profile.id} to public.profiles via upsert")
         } catch (e: Exception) {
-            AppLogger.w("BookSphereRepo", "Failed to update public.profiles: ${e.message}")
+            AppLogger.w("BookSphereRepo", "Failed to upsert public.profiles: ${e.message}")
         }
     }
 
@@ -1032,7 +1080,7 @@ class BookSphereRepository(
         false
     }
 
-    suspend fun resolveBookAccess(book: Book, userId: String?): ResolvedBookAccess = withContext(Dispatchers.IO) {
+    suspend fun resolveBookAccess(book: Book, userId: String?, context: Context? = null): ResolvedBookAccess = withContext(Dispatchers.IO) {
         val isAuthor = userId != null && book.authorId != null && book.authorId == userId
         val isPurchasedOrEntitled = isAuthor || verifyEntitlement(userId, book.id)
         val hasFullAccess = book.isFree || isPurchasedOrEntitled
@@ -1066,6 +1114,22 @@ class BookSphereRepository(
                     totalPages = book.totalPages
                 )
             }
+            if (context != null) {
+                try {
+                    val sampleFile = SamplePdfHelper.getOrCreateSamplePdf(context, book)
+                    if (sampleFile.exists() && sampleFile.length() > 0L) {
+                        return@withContext ResolvedBookAccess(
+                            bookId = book.id,
+                            target = BookAccessTarget.LocalUri(sampleFile.absolutePath),
+                            isPreviewOnly = false,
+                            allowedPages = book.totalPages,
+                            totalPages = book.totalPages
+                        )
+                    }
+                } catch (e: Exception) {
+                    AppLogger.w("BookSphereRepo", "Sample PDF generation warning: ${e.message}")
+                }
+            }
             if (book.contentPages.isNotEmpty()) {
                 return@withContext ResolvedBookAccess(
                     bookId = book.id,
@@ -1073,6 +1137,16 @@ class BookSphereRepository(
                     isPreviewOnly = false,
                     allowedPages = book.contentPages.size,
                     totalPages = book.contentPages.size
+                )
+            }
+            if (book.samplePages.isNotEmpty()) {
+                val pagesText = formatSamplePagesToText(book.samplePages)
+                return@withContext ResolvedBookAccess(
+                    bookId = book.id,
+                    target = BookAccessTarget.EmbeddedPages(pagesText),
+                    isPreviewOnly = false,
+                    allowedPages = pagesText.size,
+                    totalPages = pagesText.size
                 )
             }
         } else {
@@ -1104,6 +1178,22 @@ class BookSphereRepository(
                     totalPages = book.totalPages
                 )
             }
+            if (context != null) {
+                try {
+                    val sampleFile = SamplePdfHelper.getOrCreateSamplePdf(context, book)
+                    if (sampleFile.exists() && sampleFile.length() > 0L) {
+                        return@withContext ResolvedBookAccess(
+                            bookId = book.id,
+                            target = BookAccessTarget.LocalUri(sampleFile.absolutePath),
+                            isPreviewOnly = true,
+                            allowedPages = previewCount,
+                            totalPages = book.totalPages
+                        )
+                    }
+                } catch (e: Exception) {
+                    AppLogger.w("BookSphereRepo", "Sample preview PDF generation warning: ${e.message}")
+                }
+            }
             if (book.contentPages.isNotEmpty()) {
                 return@withContext ResolvedBookAccess(
                     bookId = book.id,
@@ -1111,6 +1201,16 @@ class BookSphereRepository(
                     isPreviewOnly = true,
                     allowedPages = previewCount,
                     totalPages = book.contentPages.size
+                )
+            }
+            if (book.samplePages.isNotEmpty()) {
+                val pagesText = formatSamplePagesToText(book.samplePages)
+                return@withContext ResolvedBookAccess(
+                    bookId = book.id,
+                    target = BookAccessTarget.EmbeddedPages(pagesText.take(previewCount)),
+                    isPreviewOnly = true,
+                    allowedPages = previewCount,
+                    totalPages = pagesText.size
                 )
             }
         }
@@ -1122,5 +1222,28 @@ class BookSphereRepository(
             allowedPages = 0,
             totalPages = 0
         )
+    }
+
+    private fun formatSamplePagesToText(samplePages: List<SamplePage>): List<String> {
+        return samplePages.map { sp ->
+            buildString {
+                appendLine(sp.chapterTitle)
+                appendLine()
+                if (sp.dropCapLetter.isNotBlank()) {
+                    append(sp.dropCapLetter)
+                    append(sp.firstSentenceRemainder)
+                    appendLine()
+                    appendLine()
+                }
+                sp.paragraphs.forEach { p ->
+                    appendLine(p)
+                    appendLine()
+                }
+                sp.footnote?.let { fn ->
+                    appendLine("---")
+                    appendLine(fn)
+                }
+            }
+        }
     }
 }

@@ -434,13 +434,13 @@ class UnitTestSuite {
 
         val singleSaleNet = RoyaltyConfig.calculateAuthorNet(price = 1000.0, copiesSold = 1)
         val singleSaleFee = RoyaltyConfig.calculatePlatformFee(price = 1000.0, copiesSold = 1)
-        assertEquals(850.0, singleSaleNet, 0.001)
-        assertEquals(150.0, singleSaleFee, 0.001)
+        assertEquals(700.0, singleSaleNet, 0.001)
+        assertEquals(300.0, singleSaleFee, 0.001)
 
         val bulkSaleNet = RoyaltyConfig.calculateAuthorNet(price = 500.0, copiesSold = 20)
         val bulkSaleFee = RoyaltyConfig.calculatePlatformFee(price = 500.0, copiesSold = 20)
-        assertEquals(8500.0, bulkSaleNet, 0.001)
-        assertEquals(1500.0, bulkSaleFee, 0.001)
+        assertEquals(7000.0, bulkSaleNet, 0.001)
+        assertEquals(3000.0, bulkSaleFee, 0.001)
         assertEquals(10000.0, bulkSaleNet + bulkSaleFee, 0.001)
     }
 }

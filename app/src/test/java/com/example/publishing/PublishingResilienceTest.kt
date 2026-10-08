@@ -141,20 +141,20 @@ class PublishingResilienceTest {
     }
 
     @Test
-    fun testRoyaltyCalculatesAuthorEightyFivePercent() {
-        assertEquals(85.0, RoyaltyConfig.AUTHOR_PERCENT, 0.001)
-        assertEquals(15.0, RoyaltyConfig.PLATFORM_PERCENT, 0.001)
+    fun testRoyaltyCalculatesAuthorSeventyPercent() {
+        assertEquals(70.0, RoyaltyConfig.AUTHOR_PERCENT, 0.001)
+        assertEquals(30.0, RoyaltyConfig.PLATFORM_PERCENT, 0.001)
 
         val bookPrice = 100.0
         val authorNet = RoyaltyConfig.calculateAuthorNet(bookPrice, 1)
         val platformFee = RoyaltyConfig.calculatePlatformFee(bookPrice, 1)
 
-        assertEquals("Author net must be 85% of retail", 85.0, authorNet, 0.001)
-        assertEquals("Platform fee must be 15% of retail", 15.0, platformFee, 0.001)
+        assertEquals("Author net must be 70% of retail", 70.0, authorNet, 0.001)
+        assertEquals("Platform fee must be 30% of retail", 30.0, platformFee, 0.001)
         assertEquals("Author + Platform must sum to 100%", bookPrice, authorNet + platformFee, 0.001)
 
         val multipleCopiesNet = RoyaltyConfig.calculateAuthorNet(200.0, 5)
-        assertEquals("Author net for 5 copies of 200 INR must be 850 INR", 850.0, multipleCopiesNet, 0.001)
+        assertEquals("Author net for 5 copies of 200 INR must be 700 INR", 700.0, multipleCopiesNet, 0.001)
     }
 
     @Test

@@ -246,30 +246,30 @@ fun BookSphereApp(
             currentProfile = currentProfile,
             initialRole = userRole,
             onDismiss = { viewModel.setShowSignUpDialog(false) },
-            onEmailSignUp = { name, email, pass, role ->
+            onEmailSignUp = { name, email, pass, role, onResult ->
                 viewModel.signUpWithEmail(
                     name = name,
                     email = email,
                     pass = pass,
                     role = role,
-                    onSuccess = {},
-                    onError = {}
+                    onSuccess = { onResult(Result.success(Unit)) },
+                    onError = { errMsg -> onResult(Result.failure(Exception(errMsg))) }
                 )
             },
-            onEmailSignIn = { email, pass ->
+            onEmailSignIn = { email, pass, onResult ->
                 viewModel.signInWithEmail(
                     email = email,
                     pass = pass,
-                    onSuccess = {},
-                    onError = {}
+                    onSuccess = { onResult(Result.success(Unit)) },
+                    onError = { errMsg -> onResult(Result.failure(Exception(errMsg))) }
                 )
             },
-            onGoogleSignIn = { idToken, preferredRole ->
+            onGoogleSignIn = { idToken, preferredRole, onResult ->
                 viewModel.signInWithGoogleIdToken(
                     idToken = idToken,
                     preferredRole = preferredRole,
-                    onSuccess = {},
-                    onError = {}
+                    onSuccess = { onResult(Result.success(Unit)) },
+                    onError = { errMsg -> onResult(Result.failure(Exception(errMsg))) }
                 )
             },
             onSignOut = {

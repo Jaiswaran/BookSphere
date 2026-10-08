@@ -15,13 +15,13 @@ import org.junit.Test
 class ExampleUnitTest {
 
     @Test
-    fun testRoyaltySplit_MatchesAuthorEightyFivePercent() {
+    fun testRoyaltySplit_MatchesAuthorSeventyPercent() {
         val retailPrice = 500.0
         val authorRevenue = RoyaltyConfig.calculateAuthorNet(retailPrice)
         val platformFee = RoyaltyConfig.calculatePlatformFee(retailPrice)
 
-        assertEquals(425.0, authorRevenue, 0.001)
-        assertEquals(75.0, platformFee, 0.001)
+        assertEquals(350.0, authorRevenue, 0.001)
+        assertEquals(150.0, platformFee, 0.001)
         assertEquals(retailPrice, authorRevenue + platformFee, 0.001)
     }
 

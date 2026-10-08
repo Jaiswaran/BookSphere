@@ -179,7 +179,7 @@ object SampleData {
             price = 499.0,
             copiesSold = 824,
             rating = 4.9,
-            netEarned = 349474.0,
+            netEarned = RoyaltyConfig.calculateAuthorNet(499.0, 824),
             status = "Published",
             coverUrl = "https://lh3.googleusercontent.com/aida-public/AB6AXuB-cPew5GkXbFMCwQ8t3umj-6P0Xp9apOmth6quK88aCXzgckmAisrobQ01faTIh737irKQMGM4MKn06z7BhAbh5snfAI3GiQlKqEXXaR0ZIA1RdVSEsRs2xcT0lmZIg4_KfntsJzc8zMlCOnFR_Wa3swV63Bv0s5FRV0RV8Gj7A2gtbgPdI29NTMZ8IjBCpAb_SvIW6o9umYpzm-nUxmXs2_S_rtkCPh4hV4eofmQf6i_lpzUyqgd2",
             genre = "Speculative Fiction"
@@ -190,7 +190,7 @@ object SampleData {
             price = 399.0,
             copiesSold = 412,
             rating = 4.8,
-            netEarned = 139729.0,
+            netEarned = RoyaltyConfig.calculateAuthorNet(399.0, 412),
             status = "Published",
             coverUrl = "https://lh3.googleusercontent.com/aida-public/AB6AXuAbREXm6WuoQfTSx4gwFSveQ804RzPvIA3wH4j5b90oGsgViZGiCvpqZN2UT1TS26iqtq9uyyq-GvSzXfkfiQp3CXJe-9bxFYL0hwOk_CuPAeHydE3yX4VSfMJeCBGDndEWdViVVu_C3zoXbMJoS4ATPJGXJ4xrZMP8RxrRQkkc_3M7gt5H3r43PBgStnxnB70v86eCSWHTdo_BQzotuOko20SpOhrfWP3_1ojcFiXkvxhE5COfYBBv",
             genre = "Poetry & Epistolary"

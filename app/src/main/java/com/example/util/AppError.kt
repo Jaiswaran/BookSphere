@@ -68,7 +68,25 @@ data class AppError(
 
             val friendlyUserMessage = when (category) {
                 ErrorCategory.NETWORK_ERROR -> "No internet connection. Please check your network and try again."
-                ErrorCategory.AUTH_ERROR -> "Authentication session expired or invalid. Please sign in again."
+                ErrorCategory.AUTH_ERROR -> when {
+                    lowerMsg.contains("jwt") || lowerMsg.contains("session expired") || lowerMsg.contains("invalid_grant") || lowerMsg.contains("expired") ->
+                        "Authentication session expired or invalid. Please sign in again."
+                    lowerMsg.contains("invalid login") || lowerMsg.contains("invalid_credentials") ->
+                        "Invalid email or password. Please verify your credentials."
+                    lowerMsg.contains("email not confirmed") || lowerMsg.contains("email_not_confirmed") ->
+                        "Please confirm your email address before signing in. Check your inbox for the confirmation link."
+                    lowerMsg.contains("user already registered") || lowerMsg.contains("user_already_exists") ->
+                        "An account with this email already exists. Please sign in."
+                    lowerMsg.contains("password should be at least") ->
+                        "Password must be at least 6 characters long."
+                    lowerMsg.contains("rate limit") ->
+                        "Too many attempts. Please wait a moment and try again."
+                    lowerMsg.contains("confirmation link sent") || lowerMsg.contains("verify your email") ->
+                        msg
+                    msg.isNotBlank() && !msg.contains("{") && !msg.contains("Exception") ->
+                        msg
+                    else -> "Authentication failed. Please check your credentials."
+                }
                 ErrorCategory.PERMISSION_ERROR -> "You do not have permission to perform this action."
                 ErrorCategory.STORAGE_ERROR -> "Cloud storage operation failed. Please retry in a moment."
                 ErrorCategory.DATABASE_ERROR -> "Database service is temporarily unavailable. Please retry."

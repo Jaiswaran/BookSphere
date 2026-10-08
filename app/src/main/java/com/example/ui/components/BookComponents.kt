@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import kotlinx.coroutines.launch
@@ -734,16 +735,30 @@ fun SearchFilterDialog(
         }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 12.dp,
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 580.dp)
+                .fillMaxSize()
+                .systemBarsPadding()
+                .imePadding()
+                .padding(horizontal = 20.dp, vertical = 24.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 12.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 580.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -871,15 +886,16 @@ fun SearchFilterDialog(
         }
     }
 }
+}
 
 @Composable
 fun SignUpDialog(
     currentProfile: UserProfile? = null,
     initialRole: UserRole = UserRole.READER,
     onDismiss: () -> Unit,
-    onEmailSignUp: (name: String, email: String, pass: String, role: UserRole) -> Unit = { _, _, _, _ -> },
-    onEmailSignIn: (email: String, pass: String) -> Unit = { _, _ -> },
-    onGoogleSignIn: (idToken: String, preferredRole: UserRole) -> Unit = { _, _ -> },
+    onEmailSignUp: (name: String, email: String, pass: String, role: UserRole, onResult: (Result<Unit>) -> Unit) -> Unit = { _, _, _, _, _ -> },
+    onEmailSignIn: (email: String, pass: String, onResult: (Result<Unit>) -> Unit) -> Unit = { _, _, _ -> },
+    onGoogleSignIn: (idToken: String, preferredRole: UserRole, onResult: (Result<Unit>) -> Unit) -> Unit = { _, _, _ -> },
     onSignOut: () -> Unit = {}
 ) {
     var isSignUpMode by remember { mutableStateOf(currentProfile == null) }
@@ -896,15 +912,28 @@ fun SignUpDialog(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp)
-                .shadow(16.dp, RoundedCornerShape(20.dp)),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                .fillMaxSize()
+                .systemBarsPadding()
+                .imePadding()
+                .padding(horizontal = 20.dp, vertical = 24.dp),
+            contentAlignment = Alignment.Center
         ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(16.dp, RoundedCornerShape(20.dp)),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -940,6 +969,33 @@ fun SignUpDialog(
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
+
+                // Status banner (e.g. Email verification sent)
+                if (statusMessage != null) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Email,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = statusMessage!!,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
 
                 // Error banner
                 if (errorMessage != null) {
@@ -1190,24 +1246,68 @@ fun SignUpDialog(
                     Button(
                         onClick = {
                             errorMessage = null
+                            statusMessage = null
                             if (email.isBlank() || password.isBlank()) {
                                 errorMessage = "Please enter email and password."
                                 return@Button
                             }
+                            if (password.length < 6) {
+                                errorMessage = "Password must be at least 6 characters long."
+                                return@Button
+                            }
+                            isSubmitting = true
                             if (isSignUpMode) {
                                 if (name.isBlank()) {
+                                    isSubmitting = false
                                     errorMessage = "Please enter your name."
                                     return@Button
                                 }
-                                onEmailSignUp(name, email, password, selectedRole)
+                                onEmailSignUp(name, email, password, selectedRole) { result ->
+                                    isSubmitting = false
+                                    result.fold(
+                                        onSuccess = {
+                                            onDismiss()
+                                        },
+                                        onFailure = { err ->
+                                            val msg = err.message ?: "Signup failed."
+                                            if (msg.contains("Confirmation link sent", ignoreCase = true) ||
+                                                msg.contains("verify your email", ignoreCase = true)
+                                            ) {
+                                                statusMessage = msg
+                                                errorMessage = null
+                                            } else {
+                                                errorMessage = msg
+                                            }
+                                        }
+                                    )
+                                }
                             } else {
-                                onEmailSignIn(email, password)
+                                onEmailSignIn(email, password) { result ->
+                                    isSubmitting = false
+                                    result.fold(
+                                        onSuccess = {
+                                            onDismiss()
+                                        },
+                                        onFailure = { err ->
+                                            errorMessage = err.message ?: "Sign-in failed. Please verify credentials."
+                                        }
+                                    )
+                                }
                             }
                         },
                         modifier = Modifier.fillMaxWidth().height(48.dp),
+                        enabled = !isSubmitting,
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text(if (isSignUpMode) "Sign Up with Supabase" else "Sign In with Supabase")
+                        if (isSubmitting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(if (isSignUpMode) "Sign Up with Supabase" else "Sign In with Supabase")
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -1261,7 +1361,13 @@ fun SignUpDialog(
                                             if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                                                 val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
                                                 val idToken = googleIdTokenCredential.idToken
-                                                onGoogleSignIn(idToken, selectedRole)
+                                                onGoogleSignIn(idToken, selectedRole) { authResult ->
+                                                    isGoogleLoading = false
+                                                    authResult.fold(
+                                                        onSuccess = { onDismiss() },
+                                                        onFailure = { err -> errorMessage = err.message ?: "Google Sign-In failed." }
+                                                    )
+                                                }
                                             }
                                         } else {
                                             errorMessage = "Configure WEB_CLIENT_ID in Secrets to enable Google OAuth with Supabase."
@@ -1322,6 +1428,7 @@ fun SignUpDialog(
             }
         }
     }
+}
 }
 
 @Composable
