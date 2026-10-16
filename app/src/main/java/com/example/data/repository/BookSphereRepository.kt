@@ -173,6 +173,20 @@ class BookSphereRepository(
         }
     }
 
+    suspend fun fetchBookById(id: String): Book? = withContext(Dispatchers.IO) {
+        try {
+            val cached = bookDao.getBookById(id)
+            if (cached != null) return@withContext cached.toBook()
+        } catch (_: Exception) {}
+        try {
+            val dto = supabase.from("books").select {
+                filter { eq("id", id) }
+            }.decodeSingleOrNull<BookDto>()
+            if (dto != null) return@withContext dtoToBook(dto)
+        } catch (_: Exception) {}
+        null
+    }
+
     suspend fun fetchUserLibrary(userId: String): List<Book> = withContext(Dispatchers.IO) {
         try {
             val libraryEntries = supabase.from("library")
@@ -726,6 +740,7 @@ class BookSphereRepository(
         price: Double,
         isFree: Boolean,
         coverBytes: ByteArray?,
+        coverUrl: String? = null,
         manuscriptFile: File?,
         previewPages: Int = 3,
         existingBookId: String? = null,
@@ -741,14 +756,15 @@ class BookSphereRepository(
             currentStageName = "Validation"
             onProgress(PublicationStage.Validating)
 
-            var totalPages = 100
-            if (manuscriptFile != null && manuscriptFile.exists()) {
-                val manuscriptInfo = PublicationValidator.inspectManuscriptPdf(manuscriptFile)
-                if (!manuscriptInfo.isValid) {
-                    throw IllegalArgumentException(manuscriptInfo.errorMessage ?: "Invalid manuscript PDF.")
-                }
-                totalPages = manuscriptInfo.pageCount
+            if (manuscriptFile == null || !manuscriptFile.exists() || manuscriptFile.length() == 0L) {
+                throw IllegalArgumentException("A valid, non-empty manuscript PDF file is required to publish.")
             }
+
+            val manuscriptInfo = PublicationValidator.inspectManuscriptPdf(manuscriptFile)
+            if (!manuscriptInfo.isValid) {
+                throw IllegalArgumentException(manuscriptInfo.errorMessage ?: "Invalid manuscript PDF.")
+            }
+            val totalPages = manuscriptInfo.pageCount
 
             val metaResult = PublicationValidator.validateMetadata(
                 title = title,
@@ -826,7 +842,7 @@ class BookSphereRepository(
             // 4. Upload Cover
             val coverStoragePath = "$userId/$bookId.jpg"
             val fullCoverPath = "covers/$coverStoragePath"
-            var resolvedCoverUrl = SampleData.sampleCelestialCartographer.coverUrl
+            var resolvedCoverUrl = coverUrl ?: SampleData.sampleCelestialCartographer.coverUrl
 
             if (coverBytes != null && coverBytes.isNotEmpty()) {
                 currentStageName = "Uploading Cover"
@@ -853,58 +869,56 @@ class BookSphereRepository(
             val manuscriptStoragePath = "$userId/$bookId/manuscript.pdf"
             val fullManuscriptPath = "manuscripts/$manuscriptStoragePath"
 
-            if (manuscriptFile != null && manuscriptFile.exists()) {
-                currentStageName = "Uploading Manuscript"
-                onProgress(PublicationStage.UploadingManuscript(bookId))
-                try {
-                    val manuscriptBytes = manuscriptFile.readBytes()
-                    supabase.storage.from("manuscripts").upload(
-                        path = manuscriptStoragePath,
-                        data = manuscriptBytes
-                    ) {
-                        upsert = true
-                    }
-                    uploadedFiles.add("manuscripts" to manuscriptStoragePath)
-                    AppLogger.d("BookSphereRepo", "Manuscript uploaded: $fullManuscriptPath")
-                } catch (e: Exception) {
-                    AppLogger.e("BookSphereRepo", "Failed to upload manuscript: ${e.message}", e)
-                    throw IllegalStateException("Failed to upload manuscript to Supabase Storage: ${e.message}")
+            currentStageName = "Uploading Manuscript"
+            onProgress(PublicationStage.UploadingManuscript(bookId))
+            try {
+                val manuscriptBytes = manuscriptFile.readBytes()
+                supabase.storage.from("manuscripts").upload(
+                    path = manuscriptStoragePath,
+                    data = manuscriptBytes
+                ) {
+                    upsert = true
                 }
+                uploadedFiles.add("manuscripts" to manuscriptStoragePath)
+                AppLogger.d("BookSphereRepo", "Manuscript uploaded: $fullManuscriptPath")
+            } catch (e: Exception) {
+                AppLogger.e("BookSphereRepo", "Failed to upload manuscript: ${e.message}", e)
+                throw IllegalStateException("Failed to upload manuscript to Supabase Storage: ${e.message}")
+            }
 
-                coroutineContext.ensureActive()
+            coroutineContext.ensureActive()
 
-                // 6. Generate Preview PDF
-                currentStageName = "Generating Preview"
-                onProgress(PublicationStage.GeneratingPreview(bookId, previewPages))
+            // 6. Generate Preview PDF
+            currentStageName = "Generating Preview"
+            onProgress(PublicationStage.GeneratingPreview(bookId, previewPages))
 
-                val previewTempFile = File(context.cacheDir, "preview_$bookId.pdf")
-                val previewGenerated = generatePreviewPdf(manuscriptFile, previewTempFile, previewPages)
-                if (!previewGenerated || !previewTempFile.exists() || previewTempFile.length() == 0L) {
-                    throw IllegalStateException("Failed to generate preview PDF ($previewPages pages) from manuscript.")
+            val previewTempFile = File(context.cacheDir, "preview_$bookId.pdf")
+            val previewGenerated = generatePreviewPdf(manuscriptFile, previewTempFile, previewPages)
+            if (!previewGenerated || !previewTempFile.exists() || previewTempFile.length() == 0L) {
+                throw IllegalStateException("Failed to generate preview PDF ($previewPages pages) from manuscript.")
+            }
+
+            coroutineContext.ensureActive()
+
+            // 7. Upload Preview PDF
+            currentStageName = "Uploading Preview"
+            onProgress(PublicationStage.UploadingPreview(bookId))
+            val previewStoragePath = "$userId/$bookId/preview.pdf"
+            try {
+                val previewBytes = previewTempFile.readBytes()
+                supabase.storage.from("previews").upload(
+                    path = previewStoragePath,
+                    data = previewBytes
+                ) {
+                    upsert = true
                 }
-
-                coroutineContext.ensureActive()
-
-                // 7. Upload Preview PDF
-                currentStageName = "Uploading Preview"
-                onProgress(PublicationStage.UploadingPreview(bookId))
-                val previewStoragePath = "$userId/$bookId/preview.pdf"
-                try {
-                    val previewBytes = previewTempFile.readBytes()
-                    supabase.storage.from("previews").upload(
-                        path = previewStoragePath,
-                        data = previewBytes
-                    ) {
-                        upsert = true
-                    }
-                    uploadedFiles.add("previews" to previewStoragePath)
-                    AppLogger.d("BookSphereRepo", "Preview uploaded: previews/$previewStoragePath")
-                } catch (e: Exception) {
-                    AppLogger.e("BookSphereRepo", "Preview upload failed: ${e.message}", e)
-                    throw IllegalStateException("Failed to upload preview PDF to Supabase Storage: ${e.message}")
-                } finally {
-                    try { previewTempFile.delete() } catch (_: Exception) {}
-                }
+                uploadedFiles.add("previews" to previewStoragePath)
+                AppLogger.d("BookSphereRepo", "Preview uploaded: previews/$previewStoragePath")
+            } catch (e: Exception) {
+                AppLogger.e("BookSphereRepo", "Preview upload failed: ${e.message}", e)
+                throw IllegalStateException("Failed to upload preview PDF to Supabase Storage: ${e.message}")
+            } finally {
+                try { previewTempFile.delete() } catch (_: Exception) {}
             }
 
             coroutineContext.ensureActive()
@@ -912,6 +926,14 @@ class BookSphereRepository(
             // 8. Finalize Publication
             currentStageName = "Finalizing"
             onProgress(PublicationStage.Finalizing(bookId))
+
+            val finalCoverPath = if (coverBytes != null && coverBytes.isNotEmpty()) {
+                fullCoverPath
+            } else if (!coverUrl.isNullOrBlank()) {
+                coverUrl
+            } else {
+                fullCoverPath
+            }
 
             val finalizedDto = BookDto(
                 id = bookId,
@@ -923,7 +945,7 @@ class BookSphereRepository(
                 language = language.trim(),
                 price = finalPrice,
                 isFree = isFree,
-                coverPath = fullCoverPath,
+                coverPath = finalCoverPath,
                 manuscriptPath = fullManuscriptPath,
                 previewPath = "previews/$userId/$bookId/preview.pdf",
                 totalPages = totalPages,

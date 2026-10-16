@@ -11,7 +11,9 @@ import com.example.data.local.BookEntity
 import com.example.data.repository.BookSphereRepository
 import com.example.model.*
 import com.example.util.AppError
+import com.example.util.ErrorCategory
 import com.example.util.AppLogger
+import com.example.util.SamplePdfHelper
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
@@ -138,11 +140,7 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
             currentProfile.collect { profile ->
                 if (profile != null) {
                     loadUserLibrary(profile.id)
-                    if (profile.role == UserRole.AUTHOR) {
-                        loadAuthorBooks(profile.id)
-                    } else {
-                        _authorWorks.value = emptyList()
-                    }
+                    loadAuthorBooks(profile.id)
                 } else {
                     _authorWorks.value = emptyList()
                     _authorStats.value = AuthorStats(name = "Guest Reader")
@@ -219,10 +217,6 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun setTab(tab: ScreenTab) {
-        if (tab == ScreenTab.AUTHOR_STUDIO && userRole.value != UserRole.AUTHOR) {
-            _showSignUpDialog.value = true
-            return
-        }
         if (tab == ScreenTab.DISCOVER) {
             loadDiscoverBooks()
         }
@@ -234,14 +228,10 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
         if (cur == null) {
             _showSignUpDialog.value = true
         } else {
-            if (cur.role == UserRole.AUTHOR) {
-                if (_currentTab.value == ScreenTab.AUTHOR_STUDIO) {
-                    _currentTab.value = ScreenTab.DISCOVER
-                } else {
-                    _currentTab.value = ScreenTab.AUTHOR_STUDIO
-                }
+            if (_currentTab.value == ScreenTab.AUTHOR_STUDIO) {
+                _currentTab.value = ScreenTab.DISCOVER
             } else {
-                _showSignUpDialog.value = true
+                _currentTab.value = ScreenTab.AUTHOR_STUDIO
             }
         }
     }
@@ -504,12 +494,8 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
     ) {
         val profile = currentProfile.value
         if (profile == null) {
-            onError("Please sign in as an Author to publish manuscripts.")
+            onError("Please sign in to publish manuscripts.")
             _showSignUpDialog.value = true
-            return
-        }
-        if (profile.role != UserRole.AUTHOR) {
-            onError("Authorization Error: Only verified Authors can publish books.")
             return
         }
 
@@ -522,36 +508,62 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
             _publishingProgress.value = "Validating publication payload..."
 
             try {
-                val coverBytes = if (!coverUriStr.isNullOrBlank()) {
+                val isCustomCover = !coverUriStr.isNullOrBlank() && (coverUriStr.startsWith("content://") || coverUriStr.startsWith("file://"))
+                val coverBytes = if (isCustomCover) {
                     try {
                         val uri = Uri.parse(coverUriStr)
-                        if (uri.scheme == "content" || uri.scheme == "file") {
-                            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        } else null
+                        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     } catch (_: Exception) {
                         null
                     }
                 } else null
+                val coverUrlFallback = if (!isCustomCover && !coverUriStr.isNullOrBlank()) coverUriStr else null
 
-                val manuscriptFile = if (!pdfUriStr.isNullOrBlank() && pdfUriStr != "internal_preset_pdf") {
-                    try {
-                        val uri = Uri.parse(pdfUriStr)
-                        if (uri.scheme == "file") {
-                            File(uri.path ?: "")
-                        } else {
-                            val tempFile = File(context.cacheDir, "upload_${UUID.randomUUID()}.pdf")
-                            context.contentResolver.openInputStream(uri)?.use { input ->
-                                FileOutputStream(tempFile).use { output ->
-                                    input.copyTo(output)
-                                }
+                if (pdfUriStr.isNullOrBlank() || pdfUriStr == "internal_preset_pdf") {
+                    val appError = AppError(category = ErrorCategory.VALIDATION_ERROR, userMessage = "A valid PDF manuscript is required to publish a book.")
+                    _isPublishing.value = false
+                    _publishingProgress.value = null
+                    _publishError.value = appError.userMessage
+                    onError(appError.userMessage)
+                    return@launch
+                }
+
+                val manuscriptFile = try {
+                    val uri = Uri.parse(pdfUriStr)
+                    if (uri.scheme == "file") {
+                        val f = File(uri.path ?: "")
+                        if (f.exists() && f.length() > 0L) f else null
+                    } else {
+                        val tempFile = File(context.cacheDir, "upload_${UUID.randomUUID()}.pdf")
+                        context.contentResolver.openInputStream(uri)?.use { input ->
+                            FileOutputStream(tempFile).use { output ->
+                                input.copyTo(output)
                             }
-                            tempFile
                         }
-                    } catch (_: Exception) {
-                        null
+                        if (tempFile.exists() && tempFile.length() > 0L) tempFile else null
                     }
-                } else {
-                    createAutoDraftPdf(context, title, author.ifBlank { profile.name }, description)
+                } catch (e: Exception) {
+                    AppLogger.e("BookSphereViewModel", "Failed to resolve PDF manuscript: ${e.message}", e)
+                    null
+                }
+
+                if (manuscriptFile == null || !manuscriptFile.exists() || manuscriptFile.length() == 0L) {
+                    val appError = AppError(category = ErrorCategory.VALIDATION_ERROR, userMessage = "Cannot read the selected PDF manuscript file. Please select a valid file.")
+                    _isPublishing.value = false
+                    _publishingProgress.value = null
+                    _publishError.value = appError.userMessage
+                    onError(appError.userMessage)
+                    return@launch
+                }
+
+                val manuscriptInfo = com.example.util.PublicationValidator.inspectManuscriptPdf(manuscriptFile)
+                if (!manuscriptInfo.isValid) {
+                    val appError = AppError(category = ErrorCategory.VALIDATION_ERROR, userMessage = manuscriptInfo.errorMessage ?: "Selected file is not a valid PDF.")
+                    _isPublishing.value = false
+                    _publishingProgress.value = null
+                    _publishError.value = appError.userMessage
+                    onError(appError.userMessage)
+                    return@launch
                 }
 
                 val result = repository.publishBook(
@@ -564,6 +576,7 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
                     price = price,
                     isFree = isFree,
                     coverBytes = coverBytes,
+                    coverUrl = coverUrlFallback,
                     manuscriptFile = manuscriptFile,
                     previewPages = previewPages,
                     existingBookId = existingBookId,
@@ -612,27 +625,43 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
         val file = File(context.cacheDir, "autodraft_${UUID.randomUUID()}.pdf")
         val doc = android.graphics.pdf.PdfDocument()
         try {
-            val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(595, 842, 1).create()
-            val page = doc.startPage(pageInfo)
-            val canvas = page.canvas
-            val paint = android.graphics.Paint().apply {
-                color = android.graphics.Color.DKGRAY
-                textSize = 24f
-                isAntiAlias = true
+            val pagesData = listOf(
+                Pair("TITLE & PROLOGUE", desc.ifBlank { "An immersive new manuscript published on BookSphere." }),
+                Pair("CHAPTER I — AWAKENING", "The dawn illuminated the ancient spires. Words etched into memory began to take physical shape upon the parchment, offering truth to those seeking understanding."),
+                Pair("CHAPTER II — THE JOURNEY", "Across rugged territories and uncharted realms, the journey unfolded step by step, unconstrained by conventional bounds."),
+                Pair("CHAPTER III — REVELATION", "Beneath vaulted ceilings of the repository, the true narrative became evident to all who dared to venture further."),
+                Pair("EPILOGUE & AUTHOR'S NOTE", "Published independently and directly through BookSphere Sanctuary. Reader support ensures continued literary creativity.")
+            )
+
+            pagesData.forEachIndexed { index, (chapterTitle, text) ->
+                val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(595, 842, index + 1).create()
+                val page = doc.startPage(pageInfo)
+                val canvas = page.canvas
+                val paint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.DKGRAY
+                    textSize = 22f
+                    isAntiAlias = true
+                }
+                canvas.drawText(title.ifBlank { "Untitled Manuscript" }, 50f, 80f, paint)
+                paint.textSize = 14f
+                paint.color = android.graphics.Color.GRAY
+                canvas.drawText("By $author • Page ${index + 1} of ${pagesData.size}", 50f, 110f, paint)
+
+                paint.textSize = 16f
+                paint.color = android.graphics.Color.parseColor("#1F2937")
+                canvas.drawText(chapterTitle, 50f, 160f, paint)
+
+                paint.textSize = 13f
+                paint.color = android.graphics.Color.BLACK
+                val lines = text.chunked(65)
+                var y = 200f
+                for (line in lines) {
+                    canvas.drawText(line, 50f, y, paint)
+                    y += 24f
+                }
+                doc.finishPage(page)
             }
-            canvas.drawText(title.ifBlank { "Untitled Manuscript" }, 50f, 100f, paint)
-            paint.textSize = 16f
-            paint.color = android.graphics.Color.GRAY
-            canvas.drawText("By $author", 50f, 140f, paint)
-            paint.textSize = 14f
-            paint.color = android.graphics.Color.BLACK
-            val lines = desc.chunked(60)
-            var y = 200f
-            for (line in lines) {
-                canvas.drawText(line, 50f, y, paint)
-                y += 24f
-            }
-            doc.finishPage(page)
+
             FileOutputStream(file).use { out ->
                 doc.writeTo(out)
             }
@@ -640,6 +669,22 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
             doc.close()
         }
         return file
+    }
+
+    fun previewWork(work: PublishedWork) {
+        viewModelScope.launch {
+            val book = repository.fetchBookById(work.id) ?: _supabaseBooks.value.find { it.id == work.id } ?: Book(
+                id = work.id,
+                title = work.title,
+                author = currentProfile.value?.name ?: "Author",
+                coverUrl = work.coverUrl,
+                price = work.price,
+                rating = work.rating,
+                genre = work.genre,
+                description = "Published work from BookSphere Studio."
+            )
+            setPreviewBook(book)
+        }
     }
 
     // ==========================================
@@ -703,35 +748,65 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
                             if (access.isPreviewOnly) "Downloading preview (${access.allowedPages} pages)..."
                             else "Downloading manuscript..."
                         )
-                        val totalPages = pdfRendererManager.openPdfSource(target.url).getOrThrow()
-                        val readablePages = if (access.isPreviewOnly) {
-                            minOf(totalPages, access.allowedPages)
+                        val totalPagesRes = pdfRendererManager.openPdfSource(target.url)
+                        if (totalPagesRes.isSuccess) {
+                            val totalPages = totalPagesRes.getOrThrow()
+                            val readablePages = if (access.isPreviewOnly) {
+                                minOf(totalPages, access.allowedPages)
+                            } else {
+                                totalPages
+                            }
+                            _readerUiState.value = ReaderUiState.Success(
+                                book = book,
+                                isPreview = access.isPreviewOnly,
+                                readablePages = readablePages.coerceAtLeast(1),
+                                totalDocPages = totalPages,
+                                sourceKey = target.url
+                            )
                         } else {
-                            totalPages
+                            // Remote preview URL failed (e.g. storage asset missing or network error), fallback to sample PDF
+                            AppLogger.w("BookSphereViewModel", "Remote storage URL failed, fallback to sample PDF: ${totalPagesRes.exceptionOrNull()?.message}")
+                            val samplePdf = SamplePdfHelper.getOrCreateSamplePdf(getApplication(), book)
+                            val totalPages = pdfRendererManager.openPdfSource(samplePdf.absolutePath).getOrElse { 3 }
+                            val readablePages = if (access.isPreviewOnly) minOf(totalPages, access.allowedPages) else totalPages
+                            _readerUiState.value = ReaderUiState.Success(
+                                book = book,
+                                isPreview = access.isPreviewOnly,
+                                readablePages = readablePages.coerceAtLeast(1),
+                                totalDocPages = totalPages,
+                                sourceKey = samplePdf.absolutePath
+                            )
                         }
-                        _readerUiState.value = ReaderUiState.Success(
-                            book = book,
-                            isPreview = access.isPreviewOnly,
-                            readablePages = readablePages.coerceAtLeast(1),
-                            totalDocPages = totalPages,
-                            sourceKey = target.url
-                        )
                     }
                     is BookAccessTarget.LocalUri -> {
                         _readerUiState.value = ReaderUiState.Loading("Opening local manuscript...")
-                        val totalPages = pdfRendererManager.openPdfSource(target.uriString).getOrThrow()
-                        val readablePages = if (access.isPreviewOnly) {
-                            minOf(totalPages, access.allowedPages)
+                        val totalPagesRes = pdfRendererManager.openPdfSource(target.uriString)
+                        if (totalPagesRes.isSuccess) {
+                            val totalPages = totalPagesRes.getOrThrow()
+                            val readablePages = if (access.isPreviewOnly) {
+                                minOf(totalPages, access.allowedPages)
+                            } else {
+                                totalPages
+                            }
+                            _readerUiState.value = ReaderUiState.Success(
+                                book = book,
+                                isPreview = access.isPreviewOnly,
+                                readablePages = readablePages.coerceAtLeast(1),
+                                totalDocPages = totalPages,
+                                sourceKey = target.uriString
+                            )
                         } else {
-                            totalPages
+                            val samplePdf = SamplePdfHelper.getOrCreateSamplePdf(getApplication(), book)
+                            val totalPages = pdfRendererManager.openPdfSource(samplePdf.absolutePath).getOrElse { 3 }
+                            val readablePages = if (access.isPreviewOnly) minOf(totalPages, access.allowedPages) else totalPages
+                            _readerUiState.value = ReaderUiState.Success(
+                                book = book,
+                                isPreview = access.isPreviewOnly,
+                                readablePages = readablePages.coerceAtLeast(1),
+                                totalDocPages = totalPages,
+                                sourceKey = samplePdf.absolutePath
+                            )
                         }
-                        _readerUiState.value = ReaderUiState.Success(
-                            book = book,
-                            isPreview = access.isPreviewOnly,
-                            readablePages = readablePages.coerceAtLeast(1),
-                            totalDocPages = totalPages,
-                            sourceKey = target.uriString
-                        )
                     }
                     is BookAccessTarget.EmbeddedPages -> {
                         val readablePages = if (access.isPreviewOnly) {

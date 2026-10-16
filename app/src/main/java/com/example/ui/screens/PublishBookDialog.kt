@@ -95,10 +95,10 @@ fun PublishBookDialog(
     var selectedCoverUrl by remember { mutableStateOf(defaultCovers[0].second) }
     var customCoverUri by remember { mutableStateOf<Uri?>(null) }
     var pdfUri by remember { mutableStateOf<Uri?>(null) }
-    var pdfFileName by remember { mutableStateOf<String?>("Sample_Manuscript_Draft.pdf") }
-    var pdfFileSize by remember { mutableStateOf<String?>("2.4 MB") }
-    var pdfTotalPages by remember { mutableStateOf(180) }
-    var isUsingPresetManuscript by remember { mutableStateOf(true) }
+    var pdfFileName by remember { mutableStateOf<String?>(null) }
+    var pdfFileSize by remember { mutableStateOf<String?>(null) }
+    var pdfTotalPages by remember { mutableIntStateOf(0) }
+    var isUsingPresetManuscript by remember { mutableStateOf(false) }
     
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
@@ -110,25 +110,25 @@ fun PublishBookDialog(
         }
     }
     
-                    val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             coroutineScope.launch {
                 isProcessing = true
                 errorMessage = null
                 try {
                     var sizeBytes = 0L
+                    var displayName: String? = null
                     context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                         val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                         val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
                         if (cursor.moveToFirst()) {
-                            if (nameIndex != -1) pdfFileName = cursor.getString(nameIndex)
+                            if (nameIndex != -1) displayName = cursor.getString(nameIndex)
                             if (sizeIndex != -1) sizeBytes = cursor.getLong(sizeIndex)
-                            pdfFileSize = "${(sizeBytes / (1024 * 1024)).coerceAtLeast(1)} MB"
                         }
                     }
 
                     // Enforce maximum file size (50MB)
-                    if (sizeBytes > 50 * 1024 * 1024) {
+                    if (sizeBytes > com.example.util.PublicationValidator.MAX_PDF_SIZE_BYTES) {
                         errorMessage = "Manuscript exceeds maximum allowed size of 50 MB."
                         return@launch
                     }
@@ -139,31 +139,32 @@ fun PublishBookDialog(
                         FileOutputStream(internalFile).use { output ->
                             input.copyTo(output)
                         }
-                    } ?: throw IllegalStateException("Cannot read selected file.")
+                    } ?: throw IllegalStateException("Cannot read selected file: inaccessible content stream.")
 
                     if (!internalFile.exists() || internalFile.length() == 0L) {
-                        errorMessage = "Selected PDF file is empty."
+                        errorMessage = "Selected PDF file is empty (0 bytes)."
+                        try { internalFile.delete() } catch (_: Exception) {}
                         return@launch
                     }
                     
-                    // Verify that the PDF is valid and has pages > 0
-                    var pageCount = 0
-                    val fd = android.os.ParcelFileDescriptor.open(internalFile, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
-                    try {
-                        val renderer = android.graphics.pdf.PdfRenderer(fd)
-                        pageCount = renderer.pageCount
-                        renderer.close()
-                    } finally {
-                        fd.close()
-                    }
-
-                    if (pageCount <= 0) {
-                        internalFile.delete()
-                        errorMessage = "The selected PDF has no readable pages."
+                    val manuscriptInfo = com.example.util.PublicationValidator.inspectManuscriptPdf(internalFile)
+                    if (!manuscriptInfo.isValid) {
+                        try { internalFile.delete() } catch (_: Exception) {}
+                        errorMessage = manuscriptInfo.errorMessage ?: "The selected file is not a readable PDF."
                         return@launch
                     }
 
-                    pdfTotalPages = pageCount
+                    val rawName = displayName?.trim()?.ifBlank { null } ?: "manuscript.pdf"
+                    val lengthBytes = internalFile.length()
+                    val formattedSize = if (lengthBytes < 1024 * 1024) {
+                        "${(lengthBytes / 1024).coerceAtLeast(1)} KB"
+                    } else {
+                        "%.1f MB".format(lengthBytes.toDouble() / (1024.0 * 1024.0))
+                    }
+
+                    pdfFileName = rawName
+                    pdfFileSize = formattedSize
+                    pdfTotalPages = manuscriptInfo.pageCount
                     pdfUri = Uri.fromFile(internalFile)
                     isUsingPresetManuscript = false
                 } catch (e: Exception) {
@@ -387,7 +388,7 @@ fun PublishBookDialog(
                     
                     // Manuscript PDF Section
                     Text(
-                        text = "Manuscript Document (PDF / ePub)",
+                        text = "Manuscript Document (PDF) *",
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -408,53 +409,32 @@ fun PublishBookDialog(
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Icon(
-                                    imageVector = if (isUsingPresetManuscript) Icons.Default.AutoStories else Icons.Default.CloudDone,
+                                    imageVector = if (pdfUri != null) Icons.Default.CloudDone else Icons.Default.AutoStories,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = if (pdfUri != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
                                     modifier = Modifier.size(28.dp)
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = pdfFileName ?: "Manuscript Ready",
+                                        text = if (pdfUri != null) (pdfFileName ?: "Manuscript Ready") else "No PDF Selected",
                                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.primary
+                                        color = if (pdfUri != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = if (isUsingPresetManuscript) "Preset Fair-Standard Manuscript ($pdfTotalPages pages)" else "$pdfFileSize • $pdfTotalPages pages",
+                                        text = if (pdfUri != null) "$pdfFileSize • $pdfTotalPages pages • Validated" else "Selecting a real PDF manuscript is required for publishing.",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
                             
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            OutlinedButton(
+                                onClick = { pdfPicker.launch("application/pdf") },
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                OutlinedButton(
-                                    onClick = { pdfPicker.launch("application/pdf") },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Pick PDF File", fontSize = 12.sp)
-                                }
-                                
-                                Button(
-                                    onClick = {
-                                        isUsingPresetManuscript = true
-                                        pdfFileName = "Draft_${title.ifBlank { "Manuscript" }}.pdf"
-                                        pdfTotalPages = 180
-                                        pdfUri = null
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (isUsingPresetManuscript) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.surfaceVariant,
-                                        contentColor = if (isUsingPresetManuscript) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                ) {
-                                    Text("Use Auto-Draft", fontSize = 12.sp)
-                                }
+                                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(if (pdfUri != null) "Change Selected PDF File" else "Pick PDF Manuscript *", fontSize = 13.sp)
                             }
                         }
                     }
@@ -517,6 +497,15 @@ fun PublishBookDialog(
                 
                 Button(
                     onClick = {
+                        if (pdfUri == null) {
+                            errorMessage = "Please select a valid PDF manuscript before publishing."
+                            return@Button
+                        }
+                        if (pdfTotalPages <= 0) {
+                            errorMessage = "The selected PDF manuscript contains no readable pages."
+                            return@Button
+                        }
+
                         val finalAuthor = author.ifBlank { "Independent Author" }
                         val finalPrice = if (isFree) 0.0 else (priceStr.toDoubleOrNull() ?: -1.0)
                         val prevPages = previewPagesStr.toIntOrNull() ?: 3
@@ -539,7 +528,7 @@ fun PublishBookDialog(
                         }
 
                         val chosenCover = customCoverUri?.toString() ?: selectedCoverUrl
-                        val chosenPdf = pdfUri?.toString() ?: "internal_preset_pdf"
+                        val chosenPdf = pdfUri!!.toString()
                         
                         onPublish(
                             title, finalAuthor, description, genre, category, finalPrice, language,

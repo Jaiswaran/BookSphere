@@ -56,7 +56,7 @@ fun BookSphereApp(
     val publishedWorks = remember(authorWorks, currentProfile) {
         if (authorWorks.isNotEmpty()) {
             authorWorks
-        } else if (currentProfile?.role == UserRole.AUTHOR) {
+        } else if (currentProfile != null) {
             emptyList()
         } else {
             SampleData.authorPublishedWorks
@@ -191,6 +191,7 @@ fun BookSphereApp(
                         onBack = { viewModel.setTab(ScreenTab.DISCOVER) },
                         onBuyNow = { book -> viewModel.openCheckout(book) },
                         onReadBook = { book -> 
+                            viewModel.setPreviewBook(book)
                             if (book.isFree) {
                                 viewModel.openFreeBook(book)
                             }
@@ -260,14 +261,6 @@ fun BookSphereApp(
                 viewModel.signInWithEmail(
                     email = email,
                     pass = pass,
-                    onSuccess = { onResult(Result.success(Unit)) },
-                    onError = { errMsg -> onResult(Result.failure(Exception(errMsg))) }
-                )
-            },
-            onGoogleSignIn = { idToken, preferredRole, onResult ->
-                viewModel.signInWithGoogleIdToken(
-                    idToken = idToken,
-                    preferredRole = preferredRole,
                     onSuccess = { onResult(Result.success(Unit)) },
                     onError = { errMsg -> onResult(Result.failure(Exception(errMsg))) }
                 )

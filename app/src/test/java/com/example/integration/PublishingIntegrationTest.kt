@@ -38,14 +38,13 @@ class PublishingIntegrationTest {
             id = "author_uuid_42",
             name = "Elena Rostova",
             email = "elena.rostova@booksphere.lit",
-            role = "AUTHOR_VERIFIED",
-            authorStatus = "VERIFIED"
+            role = "AUTHOR"
         )
         val env = FakePublishingEnvironment(currentUser = author)
 
         // Step 2: Validate author status
-        val isAuthorVerified = env.currentUser.authorStatus == "VERIFIED" || env.currentUser.role == "AUTHOR_VERIFIED"
-        assertTrue("Author must be verified to publish", isAuthorVerified)
+        val isAuthorVerified = env.currentUser.role == "AUTHOR"
+        assertTrue("Author must be authenticated to publish", isAuthorVerified)
 
         // Step 3: Metadata and File Validation
         val title = "The Celestial Cartographer"
@@ -136,7 +135,7 @@ class PublishingIntegrationTest {
 
     @Test
     fun testPublishingPipeline_RollbackOnAssetUploadFailure() {
-        val author = ProfileDto(id = "author_fail_test", name = "Test Author", authorStatus = "VERIFIED")
+        val author = ProfileDto(id = "author_fail_test", name = "Test Author", role = "AUTHOR")
         val env = FakePublishingEnvironment(currentUser = author)
 
         val stableBookId = "book_fail_1"

@@ -61,10 +61,7 @@ fun BookPreviewScreen(
         } else if (book.samplePages.isNotEmpty()) {
             book.samplePages
         } else {
-            listOf(
-                com.example.data.SampleData.sampleCelestialCartographer.samplePages[0],
-                com.example.data.SampleData.sampleCelestialCartographer.samplePages[1]
-            )
+            com.example.util.SamplePdfHelper.createDefaultSamplePages(book)
         }
     }
 

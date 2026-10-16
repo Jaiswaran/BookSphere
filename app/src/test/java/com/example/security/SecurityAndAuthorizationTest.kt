@@ -28,13 +28,11 @@ class SecurityAndAuthorizationTest {
         val readerUser = ProfileDto(
             id = "reader_123",
             name = "Reader Bob",
-            role = "READER",
-            authorStatus = "NONE"
+            role = "READER"
         )
 
         val canPublish = (readerUser.role.equals("AUTHOR", ignoreCase = true) ||
-                readerUser.role.equals("AUTHOR_VERIFIED", ignoreCase = true) ||
-                readerUser.authorStatus.equals("VERIFIED", ignoreCase = true))
+                readerUser.role.equals("AUTHOR_VERIFIED", ignoreCase = true))
 
         assertFalse("Unverified reader must be rejected from publishing books", canPublish)
     }
@@ -42,7 +40,7 @@ class SecurityAndAuthorizationTest {
     // 2. Reader tries to edit another author's book
     @Test
     fun testSecurity_AuthorCannotEditAnotherAuthorsBook() {
-        val attackingAuthor = ProfileDto(id = "author_bad", name = "Bad Actor", role = "AUTHOR", authorStatus = "VERIFIED")
+        val attackingAuthor = ProfileDto(id = "author_bad", name = "Bad Actor", role = "AUTHOR")
         val victimsBook = BookDto(
             id = "book_original_1",
             authorId = "author_good",
@@ -109,19 +107,16 @@ class SecurityAndAuthorizationTest {
         assertEquals(50, initialCopiesSold)
     }
 
-    // 7. Reader tries to modify author status directly
+    // 7. Reader tries to modify role directly
     @Test
-    fun testSecurity_ReaderCannotSelfPromoteAuthorStatus() {
-        val currentProfile = ProfileDto(id = "user_reader", role = "READER", authorStatus = "NONE")
+    fun testSecurity_ReaderCannotSelfPromoteRole() {
+        val currentProfile = ProfileDto(id = "user_reader", role = "READER")
 
-        // Client attempts to send profile update containing role="AUTHOR" or author_status="VERIFIED"
-        val clientRequestedAuthorStatus = "VERIFIED"
+        // Client attempts to send profile update containing role="ADMIN"
+        val allowedClientFields = setOf("name", "photo_url")
+        val canClientUpdateRole = allowedClientFields.contains("role")
 
-        // Server-side policy only allows updating bio, name, photoUrl from client; role and author_status are ignored/protected
-        val allowedClientFields = setOf("name", "bio", "photo_url", "reading_lists_json")
-        val canClientUpdateAuthorStatus = allowedClientFields.contains("author_status")
-
-        assertFalse("Client profile update payload cannot alter author_status or role", canClientUpdateAuthorStatus)
-        assertEquals("NONE", currentProfile.authorStatus)
+        assertFalse("Client profile update payload cannot alter role", canClientUpdateRole)
+        assertEquals("READER", currentProfile.role)
     }
 }

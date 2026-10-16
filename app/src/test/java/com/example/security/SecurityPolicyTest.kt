@@ -61,29 +61,21 @@ class SecurityPolicyTest {
             id = "user_123",
             name = "Author Person",
             email = "author@booksphere.literary",
-            role = "AUTHOR_VERIFIED",
-            authorStatus = "VERIFIED"
+            role = "AUTHOR"
         )
 
-        val isAuthor = verifiedAuthorProfile.role.equals("AUTHOR", ignoreCase = true) ||
-                verifiedAuthorProfile.role.equals("AUTHOR_VERIFIED", ignoreCase = true) ||
-                verifiedAuthorProfile.authorStatus.equals("VERIFIED", ignoreCase = true)
-
-        assertTrue("Verified author status on backend must map to AUTHOR role in client", isAuthor)
+        val isAuthor = verifiedAuthorProfile.role.equals("AUTHOR", ignoreCase = true)
+        assertTrue("Author profile on backend must map to AUTHOR role in client", isAuthor)
 
         val unverifiedReaderProfile = ProfileDto(
             id = "user_456",
             name = "Reader Person",
             email = "reader@booksphere.literary",
-            role = "READER",
-            authorStatus = "NONE"
+            role = "READER"
         )
 
-        val isReaderAuthor = unverifiedReaderProfile.role.equals("AUTHOR", ignoreCase = true) ||
-                unverifiedReaderProfile.role.equals("AUTHOR_VERIFIED", ignoreCase = true) ||
-                unverifiedReaderProfile.authorStatus.equals("VERIFIED", ignoreCase = true)
-
-        assertFalse("Normal reader cannot possess author privileges", isReaderAuthor)
+        val isReaderAuthor = unverifiedReaderProfile.role.equals("AUTHOR", ignoreCase = true)
+        assertFalse("Reader role does not match AUTHOR string", isReaderAuthor)
     }
 
     @Test

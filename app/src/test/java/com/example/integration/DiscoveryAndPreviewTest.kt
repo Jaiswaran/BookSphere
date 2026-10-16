@@ -20,8 +20,7 @@ class DiscoveryAndPreviewTest {
             id = "author_user_elena",
             name = "Elena Rostova",
             email = "elena@booksphere.lit",
-            role = "AUTHOR_VERIFIED",
-            authorStatus = "VERIFIED"
+            role = "AUTHOR"
         )
 
         val publishedBookDto = BookDto(
@@ -50,8 +49,7 @@ class DiscoveryAndPreviewTest {
             id = "reader_user_alex",
             name = "Alex Mercer",
             email = "alex@readers.org",
-            role = "READER",
-            authorStatus = "NONE"
+            role = "READER"
         )
         assertNotEquals("Author and Reader must be distinct users", authorUser.id, readerUser.id)
 

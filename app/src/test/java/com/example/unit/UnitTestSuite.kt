@@ -36,23 +36,18 @@ class UnitTestSuite {
             id = "author_user_1",
             name = "Elena Rostova",
             email = "elena@booksphere.com",
-            role = "AUTHOR_VERIFIED",
-            authorStatus = "VERIFIED",
-            photoUrl = "https://example.com/avatar.png",
-            bio = "Sci-fi author"
+            role = "AUTHOR",
+            photoUrl = "https://example.com/avatar.png"
         )
 
-        val isAuthor = authorDto.role.equals("AUTHOR", ignoreCase = true) ||
-                authorDto.role.equals("AUTHOR_VERIFIED", ignoreCase = true) ||
-                authorDto.authorStatus.equals("VERIFIED", ignoreCase = true)
+        val isAuthor = authorDto.role.equals("AUTHOR", ignoreCase = true)
 
         val userProfile = UserProfile(
             id = authorDto.id,
             name = authorDto.name ?: "Anonymous",
             email = authorDto.email ?: "",
             role = if (isAuthor) UserRole.AUTHOR else UserRole.READER,
-            photoUrl = authorDto.photoUrl,
-            bio = authorDto.bio ?: ""
+            photoUrl = authorDto.photoUrl
         )
 
         assertEquals("author_user_1", userProfile.id)
@@ -66,13 +61,10 @@ class UnitTestSuite {
             id = "reader_user_2",
             name = "John Doe",
             email = "john@example.com",
-            role = "READER",
-            authorStatus = "NONE"
+            role = "READER"
         )
 
-        val isAuthor = readerDto.role.equals("AUTHOR", ignoreCase = true) ||
-                readerDto.role.equals("AUTHOR_VERIFIED", ignoreCase = true) ||
-                readerDto.authorStatus.equals("VERIFIED", ignoreCase = true)
+        val isAuthor = readerDto.role.equals("AUTHOR", ignoreCase = true)
 
         val userProfile = UserProfile(
             id = readerDto.id,

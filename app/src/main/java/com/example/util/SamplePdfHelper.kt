@@ -172,7 +172,7 @@ object SamplePdfHelper {
         return y
     }
 
-    private fun createDefaultSamplePages(book: Book): List<SamplePage> {
+    fun createDefaultSamplePages(book: Book): List<SamplePage> {
         return listOf(
             SamplePage(
                 pageNumber = 1,

@@ -439,7 +439,9 @@ fun AuthorStudioScreen(
                         shape = RoundedCornerShape(10.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerLow,
                         shadowElevation = 1.dp,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.previewWork(work) }
                     ) {
                         Row(
                             modifier = Modifier.padding(12.dp),
@@ -526,6 +528,18 @@ fun AuthorStudioScreen(
                                         },
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                     )
+                                }
+
+                                if (!isFailed) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.previewWork(work) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Icon(Icons.Outlined.Visibility, contentDescription = null, modifier = Modifier.size(12.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Preview", fontSize = 10.sp)
+                                    }
                                 }
 
                                 if (isFailed) {

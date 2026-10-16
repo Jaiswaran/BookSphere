@@ -39,11 +39,6 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.credentials.CredentialManager
-import androidx.credentials.GetCredentialRequest
-import androidx.credentials.CustomCredential
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
-import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import androidx.compose.ui.platform.LocalContext
 import android.util.Log
 import com.example.BuildConfig
@@ -176,9 +171,9 @@ fun TopNavBar(
                             )
                         } else {
                             Icon(
-                                painter = painterResource(id = R.drawable.ic_google_logo),
+                                imageVector = Icons.Default.AccountCircle,
                                 contentDescription = "Sign In",
-                                tint = Color.Unspecified,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
@@ -895,7 +890,6 @@ fun SignUpDialog(
     onDismiss: () -> Unit,
     onEmailSignUp: (name: String, email: String, pass: String, role: UserRole, onResult: (Result<Unit>) -> Unit) -> Unit = { _, _, _, _, _ -> },
     onEmailSignIn: (email: String, pass: String, onResult: (Result<Unit>) -> Unit) -> Unit = { _, _, _ -> },
-    onGoogleSignIn: (idToken: String, preferredRole: UserRole, onResult: (Result<Unit>) -> Unit) -> Unit = { _, _, _ -> },
     onSignOut: () -> Unit = {}
 ) {
     var isSignUpMode by remember { mutableStateOf(currentProfile == null) }
@@ -904,7 +898,6 @@ fun SignUpDialog(
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-    var isGoogleLoading by remember { mutableStateOf(false) }
     var isSubmitting by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -1307,111 +1300,6 @@ fun SignUpDialog(
                             )
                         } else {
                             Text(if (isSignUpMode) "Sign Up with Supabase" else "Sign In with Supabase")
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Divider(modifier = Modifier.weight(1f))
-                        Text(
-                            text = "  OR  ",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Divider(modifier = Modifier.weight(1f))
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Google Sign-In with CredentialManager + Supabase Auth
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .border(1.dp, Color(0xFFDADCE0), RoundedCornerShape(12.dp))
-                            .clickable(enabled = !isGoogleLoading) {
-                                isGoogleLoading = true
-                                errorMessage = null
-                                coroutineScope.launch {
-                                    try {
-                                        val webClientId = BuildConfig.WEB_CLIENT_ID
-                                        if (webClientId.isNotBlank() && webClientId != "YOUR_WEB_CLIENT_ID") {
-                                            val credentialManager = CredentialManager.create(context)
-                                            val googleIdOption = GetGoogleIdOption.Builder()
-                                                .setFilterByAuthorizedAccounts(false)
-                                                .setServerClientId(webClientId)
-                                                .setAutoSelectEnabled(false)
-                                                .build()
-
-                                            val request = GetCredentialRequest.Builder()
-                                                .addCredentialOption(googleIdOption)
-                                                .build()
-
-                                            val result = credentialManager.getCredential(
-                                                context = context,
-                                                request = request
-                                            )
-
-                                            val credential = result.credential
-                                            if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                                                val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                                                val idToken = googleIdTokenCredential.idToken
-                                                onGoogleSignIn(idToken, selectedRole) { authResult ->
-                                                    isGoogleLoading = false
-                                                    authResult.fold(
-                                                        onSuccess = { onDismiss() },
-                                                        onFailure = { err -> errorMessage = err.message ?: "Google Sign-In failed." }
-                                                    )
-                                                }
-                                            }
-                                        } else {
-                                            errorMessage = "Configure WEB_CLIENT_ID in Secrets to enable Google OAuth with Supabase."
-                                        }
-                                    } catch (e: Exception) {
-                                        Log.w("SupabaseAuth", "Google sign in error", e)
-                                        errorMessage = "Google Sign-In: ${e.message}"
-                                    } finally {
-                                        isGoogleLoading = false
-                                    }
-                                }
-                            },
-                        color = Color.White,
-                        shadowElevation = 1.dp
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            if (isGoogleLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text("Connecting to Google...", fontSize = 12.sp)
-                            } else {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_google_logo),
-                                    contentDescription = "Google Logo",
-                                    tint = Color.Unspecified,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = "Continue with Google",
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                                    color = Color(0xFF3C4043)
-                                )
-                            }
                         }
                     }
 
