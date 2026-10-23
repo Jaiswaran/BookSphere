@@ -198,15 +198,26 @@ fun TopNavBar(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        val avatarUrl = currentProfile?.photoUrl ?: SampleData.AUTHOR_AVATAR
-                        AsyncImage(
-                            model = avatarUrl,
-                            contentDescription = "User Avatar",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(26.dp)
-                                .clip(CircleShape)
-                        )
+                        // Keep the top-bar profile control neutral: never show a demo author's
+                        // photo as if it belonged to the signed-in reader.
+                        Surface(
+                            modifier = Modifier.size(26.dp),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = currentProfile?.name
+                                        ?.trim()
+                                        ?.firstOrNull()
+                                        ?.uppercaseChar()
+                                        ?.toString() ?: "U",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
                         Text(
                             text = "Profile",
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
