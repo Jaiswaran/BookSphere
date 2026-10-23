@@ -810,12 +810,11 @@ class BookSphereRepository(
             currentUserId = userId
 
             val profile = loadProfileFromPostgres(userId) ?: _currentProfile.value
-                ?: throw IllegalStateException("Could not verify author profile.")
+                ?: throw IllegalStateException("Could not verify your user profile.")
 
-            if (profile.role != UserRole.AUTHOR) {
-                throw IllegalStateException("Permission Denied: Only verified Authors can publish books.")
-            }
-
+            // The current publishing migration intentionally permits any authenticated user
+            // to publish. Database RLS and storage policies restrict every record/object to
+            // the signed-in user's own book ID and storage folder.
             val authorName = author.trim().ifBlank { profile.name }
             val finalPrice = if (isFree) 0.0 else price
 
