@@ -764,17 +764,15 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
                                 sourceKey = target.url
                             )
                         } else {
-                            // Remote preview URL failed (e.g. storage asset missing or network error), fallback to sample PDF
-                            AppLogger.w("BookSphereViewModel", "Remote storage URL failed, fallback to sample PDF: ${totalPagesRes.exceptionOrNull()?.message}")
-                            val samplePdf = SamplePdfHelper.getOrCreateSamplePdf(getApplication(), book)
-                            val totalPages = pdfRendererManager.openPdfSource(samplePdf.absolutePath).getOrElse { 3 }
-                            val readablePages = if (access.isPreviewOnly) minOf(totalPages, access.allowedPages) else totalPages
-                            _readerUiState.value = ReaderUiState.Success(
-                                book = book,
-                                isPreview = access.isPreviewOnly,
-                                readablePages = readablePages.coerceAtLeast(1),
-                                totalDocPages = totalPages,
-                                sourceKey = samplePdf.absolutePath
+                            val cause = totalPagesRes.exceptionOrNull()
+                            AppLogger.e("BookSphereViewModel", "Failed to open uploaded PDF for book ${book.id}: ${cause?.message}", cause)
+                            throw IllegalStateException(
+                                if (access.isPreviewOnly) {
+                                    "The uploaded preview PDF could not be opened. Please retry."
+                                } else {
+                                    "The full manuscript PDF could not be opened. Please retry."
+                                },
+                                cause
                             )
                         }
                     }
@@ -796,16 +794,9 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
                                 sourceKey = target.uriString
                             )
                         } else {
-                            val samplePdf = SamplePdfHelper.getOrCreateSamplePdf(getApplication(), book)
-                            val totalPages = pdfRendererManager.openPdfSource(samplePdf.absolutePath).getOrElse { 3 }
-                            val readablePages = if (access.isPreviewOnly) minOf(totalPages, access.allowedPages) else totalPages
-                            _readerUiState.value = ReaderUiState.Success(
-                                book = book,
-                                isPreview = access.isPreviewOnly,
-                                readablePages = readablePages.coerceAtLeast(1),
-                                totalDocPages = totalPages,
-                                sourceKey = samplePdf.absolutePath
-                            )
+                            val cause = totalPagesRes.exceptionOrNull()
+                            AppLogger.e("BookSphereViewModel", "Failed to open local PDF for book ${book.id}: ${cause?.message}", cause)
+                            throw IllegalStateException("The selected PDF could not be opened. Please select it again or retry.", cause)
                         }
                     }
                     is BookAccessTarget.EmbeddedPages -> {

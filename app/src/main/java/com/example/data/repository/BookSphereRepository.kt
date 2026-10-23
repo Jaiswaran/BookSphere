@@ -174,16 +174,27 @@ class BookSphereRepository(
     }
 
     suspend fun fetchBookById(id: String): Book? = withContext(Dispatchers.IO) {
-        try {
-            val cached = bookDao.getBookById(id)
-            if (cached != null) return@withContext cached.toBook()
-        } catch (_: Exception) {}
+        // Prefer Supabase so the reader receives the latest manuscript/preview storage paths.
+        // Room may contain an older catalog entry that cannot open the real uploaded PDF.
         try {
             val dto = supabase.from("books").select {
                 filter { eq("id", id) }
             }.decodeSingleOrNull<BookDto>()
-            if (dto != null) return@withContext dtoToBook(dto)
-        } catch (_: Exception) {}
+            if (dto != null) {
+                val remoteBook = dtoToBook(dto)
+                runCatching { bookDao.insertBook(remoteBook.toBookEntity()) }
+                return@withContext remoteBook
+            }
+        } catch (e: Exception) {
+            AppLogger.w("BookSphereRepo", "Remote book refresh failed for $id: ${e.message}")
+        }
+
+        // Use the cached record only when the remote source is unavailable.
+        try {
+            bookDao.getBookById(id)?.let { return@withContext it.toBook() }
+        } catch (e: Exception) {
+            AppLogger.w("BookSphereRepo", "Cached book lookup failed for $id: ${e.message}")
+        }
         null
     }
 
@@ -1070,7 +1081,8 @@ class BookSphereRepository(
     }
 
     private fun dtoToBook(dto: BookDto): Book {
-        val coverUrl = resolveStorageUrl("covers", dto.coverPath) ?: SampleData.sampleCelestialCartographer.coverUrl
+        // Never substitute a demo cover for a real catalog entry: missing covers stay neutral/blank.
+        val coverUrl = resolveStorageUrl("covers", dto.coverPath).orEmpty()
         return Book(
             id = dto.id,
             title = dto.title,
@@ -1134,20 +1146,23 @@ class BookSphereRepository(
 
     suspend fun resolveBookAccess(book: Book, userId: String?, context: Context? = null): ResolvedBookAccess = withContext(Dispatchers.IO) {
         val isAuthor = userId != null && book.authorId != null && book.authorId == userId
-        val isPurchasedOrEntitled = isAuthor || verifyEntitlement(userId, book.id)
-        val hasFullAccess = book.isFree || isPurchasedOrEntitled
+        // isPurchased is populated from the user's library; Storage RLS still enforces the
+        // actual permission when a signed URL is requested.
+        val isPurchasedOrEntitled = book.isPurchased || isAuthor || verifyEntitlement(userId, book.id)
+        val hasFullAccess = book.isFree || book.price <= 0.0 || isPurchasedOrEntitled
 
         if (hasFullAccess) {
             if (!book.manuscriptPath.isNullOrBlank()) {
-                val path = book.manuscriptPath
-                val cleanPath = if (path.startsWith("manuscripts/")) path.removePrefix("manuscripts/") else path
+                val cleanPath = book.manuscriptPath
+                    .removePrefix("manuscripts/")
+                    .removePrefix("/")
                 val accessUrl = try {
                     supabase.storage.from("manuscripts").createSignedUrl(cleanPath, 3600.seconds)
                 } catch (e: Exception) {
-                    AppLogger.w("BookSphereRepo", "Could not create signed URL: ${e.message}")
+                    AppLogger.e("BookSphereRepo", "Could not create signed manuscript URL for ${book.id}: ${e.message}", e)
                     null
                 }
-                if (accessUrl != null) {
+                if (!accessUrl.isNullOrBlank()) {
                     return@withContext ResolvedBookAccess(
                         bookId = book.id,
                         target = BookAccessTarget.RemoteStorageUrl(accessUrl, isSigned = true),
@@ -1156,7 +1171,10 @@ class BookSphereRepository(
                         totalPages = book.totalPages
                     )
                 }
+                // A published remote manuscript must never be replaced by generated/demo pages.
+                throw IllegalStateException("The full PDF for '${book.title}' could not be accessed. Please retry or contact the author.")
             }
+
             if (!book.pdfUri.isNullOrBlank()) {
                 return@withContext ResolvedBookAccess(
                     bookId = book.id,
@@ -1165,22 +1183,6 @@ class BookSphereRepository(
                     allowedPages = book.totalPages,
                     totalPages = book.totalPages
                 )
-            }
-            if (context != null) {
-                try {
-                    val sampleFile = SamplePdfHelper.getOrCreateSamplePdf(context, book)
-                    if (sampleFile.exists() && sampleFile.length() > 0L) {
-                        return@withContext ResolvedBookAccess(
-                            bookId = book.id,
-                            target = BookAccessTarget.LocalUri(sampleFile.absolutePath),
-                            isPreviewOnly = false,
-                            allowedPages = book.totalPages,
-                            totalPages = book.totalPages
-                        )
-                    }
-                } catch (e: Exception) {
-                    AppLogger.w("BookSphereRepo", "Sample PDF generation warning: ${e.message}")
-                }
             }
             if (book.contentPages.isNotEmpty()) {
                 return@withContext ResolvedBookAccess(
@@ -1201,25 +1203,45 @@ class BookSphereRepository(
                     totalPages = pagesText.size
                 )
             }
+            if (context != null && isBundledSampleBook(book) && book.previewPath.isNullOrBlank()) {
+                val sampleFile = SamplePdfHelper.getOrCreateSamplePdf(context, book)
+                if (sampleFile.exists() && sampleFile.length() > 0L) {
+                    return@withContext ResolvedBookAccess(
+                        bookId = book.id,
+                        target = BookAccessTarget.LocalUri(sampleFile.absolutePath),
+                        isPreviewOnly = false,
+                        allowedPages = book.totalPages,
+                        totalPages = book.totalPages
+                    )
+                }
+            }
         } else {
-            val previewCount = if (book.previewPages > 0) book.previewPages else 3
+            val previewCount = (if (book.previewPages > 0) book.previewPages else 3).coerceAtLeast(1)
             if (!book.previewPath.isNullOrBlank()) {
-                val path = book.previewPath
-                val cleanPath = if (path.startsWith("previews/")) path.removePrefix("previews/") else path
+                val cleanPath = book.previewPath
+                    .removePrefix("previews/")
+                    .removePrefix("/")
                 val previewUrl = try {
-                    supabase.storage.from("previews").publicUrl(cleanPath)
+                    supabase.storage.from("previews").createSignedUrl(cleanPath, 3600.seconds)
                 } catch (e: Exception) {
+                    AppLogger.e("BookSphereRepo", "Could not create preview URL for ${book.id}: ${e.message}", e)
                     null
                 }
                 if (!previewUrl.isNullOrBlank()) {
                     return@withContext ResolvedBookAccess(
                         bookId = book.id,
-                        target = BookAccessTarget.RemoteStorageUrl(previewUrl, isSigned = false),
+                        target = BookAccessTarget.RemoteStorageUrl(previewUrl, isSigned = true),
                         isPreviewOnly = true,
                         allowedPages = previewCount,
                         totalPages = book.totalPages
                     )
                 }
+                throw IllegalStateException("The preview PDF for '${book.title}' could not be accessed. Please retry.")
+            }
+
+            // Never fall back to the private full manuscript for a reader without entitlement.
+            if (!book.manuscriptPath.isNullOrBlank()) {
+                throw IllegalStateException("The preview for '${book.title}' is not available yet.")
             }
             if (!book.pdfUri.isNullOrBlank()) {
                 return@withContext ResolvedBookAccess(
@@ -1230,50 +1252,55 @@ class BookSphereRepository(
                     totalPages = book.totalPages
                 )
             }
-            if (context != null) {
-                try {
-                    val sampleFile = SamplePdfHelper.getOrCreateSamplePdf(context, book)
-                    if (sampleFile.exists() && sampleFile.length() > 0L) {
-                        return@withContext ResolvedBookAccess(
-                            bookId = book.id,
-                            target = BookAccessTarget.LocalUri(sampleFile.absolutePath),
-                            isPreviewOnly = true,
-                            allowedPages = previewCount,
-                            totalPages = book.totalPages
-                        )
-                    }
-                } catch (e: Exception) {
-                    AppLogger.w("BookSphereRepo", "Sample preview PDF generation warning: ${e.message}")
-                }
-            }
             if (book.contentPages.isNotEmpty()) {
+                val pages = book.contentPages.take(previewCount)
                 return@withContext ResolvedBookAccess(
                     bookId = book.id,
-                    target = BookAccessTarget.EmbeddedPages(book.contentPages.take(previewCount)),
+                    target = BookAccessTarget.EmbeddedPages(pages),
                     isPreviewOnly = true,
-                    allowedPages = previewCount,
+                    allowedPages = pages.size,
                     totalPages = book.contentPages.size
                 )
             }
             if (book.samplePages.isNotEmpty()) {
-                val pagesText = formatSamplePagesToText(book.samplePages)
+                val pagesText = formatSamplePagesToText(book.samplePages).take(previewCount)
                 return@withContext ResolvedBookAccess(
                     bookId = book.id,
-                    target = BookAccessTarget.EmbeddedPages(pagesText.take(previewCount)),
+                    target = BookAccessTarget.EmbeddedPages(pagesText),
                     isPreviewOnly = true,
-                    allowedPages = previewCount,
-                    totalPages = pagesText.size
+                    allowedPages = pagesText.size,
+                    totalPages = book.samplePages.size
                 )
+            }
+            if (context != null && isBundledSampleBook(book)) {
+                val sampleFile = SamplePdfHelper.getOrCreateSamplePdf(context, book)
+                if (sampleFile.exists() && sampleFile.length() > 0L) {
+                    val openedPages = runCatching {
+                        ParcelFileDescriptor.open(sampleFile, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+                            PdfRenderer(pfd).use { renderer -> renderer.pageCount }
+                        }
+                    }.getOrDefault(previewCount)
+                    return@withContext ResolvedBookAccess(
+                        bookId = book.id,
+                        target = BookAccessTarget.LocalUri(sampleFile.absolutePath),
+                        isPreviewOnly = true,
+                        allowedPages = minOf(openedPages, previewCount),
+                        totalPages = openedPages
+                    )
+                }
             }
         }
 
-        ResolvedBookAccess(
-            bookId = book.id,
-            target = BookAccessTarget.EmbeddedPages(emptyList()),
-            isPreviewOnly = !hasFullAccess,
-            allowedPages = 0,
-            totalPages = 0
+        throw IllegalStateException(
+            "No readable PDF or preview is available for '${book.title}'. Please refresh the catalog or ask the author to republish the book."
         )
+    }
+
+    private fun isBundledSampleBook(book: Book): Boolean {
+        return book.id == SampleData.sampleCelestialCartographer.id ||
+            book.id == SampleData.staffPickBook.id ||
+            SampleData.trendingBooks.any { it.id == book.id } ||
+            SampleData.libraryBooks.any { it.id == book.id }
     }
 
     private fun formatSamplePagesToText(samplePages: List<SamplePage>): List<String> {
