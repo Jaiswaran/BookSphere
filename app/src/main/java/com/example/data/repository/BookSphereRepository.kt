@@ -1202,7 +1202,7 @@ class BookSphereRepository(
                     totalPages = pagesText.size
                 )
             }
-            if (context != null && book.previewPath.isNullOrBlank()) {
+            if (context != null && isBundledSampleBook(book) && book.previewPath.isNullOrBlank()) {
                 val sampleFile = SamplePdfHelper.getOrCreateSamplePdf(context, book)
                 if (sampleFile.exists() && sampleFile.length() > 0L) {
                     return@withContext ResolvedBookAccess(
@@ -1271,7 +1271,7 @@ class BookSphereRepository(
                     totalPages = book.samplePages.size
                 )
             }
-            if (context != null) {
+            if (context != null && isBundledSampleBook(book)) {
                 val sampleFile = SamplePdfHelper.getOrCreateSamplePdf(context, book)
                 if (sampleFile.exists() && sampleFile.length() > 0L) {
                     val openedPages = runCatching {
@@ -1290,13 +1290,16 @@ class BookSphereRepository(
             }
         }
 
-        ResolvedBookAccess(
-            bookId = book.id,
-            target = BookAccessTarget.EmbeddedPages(emptyList()),
-            isPreviewOnly = !hasFullAccess,
-            allowedPages = 0,
-            totalPages = 0
+        throw IllegalStateException(
+            "No readable PDF or preview is available for '${book.title}'. Please refresh the catalog or ask the author to republish the book."
         )
+    }
+
+    private fun isBundledSampleBook(book: Book): Boolean {
+        return book.id == SampleData.sampleCelestialCartographer.id ||
+            book.id == SampleData.staffPickBook.id ||
+            SampleData.trendingBooks.any { it.id == book.id } ||
+            SampleData.libraryBooks.any { it.id == book.id }
     }
 
     private fun formatSamplePagesToText(samplePages: List<SamplePage>): List<String> {
