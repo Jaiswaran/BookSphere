@@ -58,11 +58,9 @@ fun BookPreviewScreen(
                     paragraphs = lines.drop(1)
                 )
             }
-        } else if (book.samplePages.isNotEmpty()) {
-            book.samplePages
         } else {
-            // Real uploaded manuscripts are previewed in ReaderScreen from the stored PDF.
-            // Do not fabricate page text for a remote book whose preview pages were not loaded.
+            // Uploaded books must be previewed from the author's PDF in ReaderScreen.
+            // Never substitute bundled sample-page text when no real preview is available.
             emptyList()
         }
     }
