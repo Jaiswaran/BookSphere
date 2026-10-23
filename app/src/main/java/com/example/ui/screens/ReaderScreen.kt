@@ -61,7 +61,8 @@ fun ReaderScreen(
     var isDarkMode by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(true) }
 
-    LaunchedEffect(book.id) {
+    // Re-resolve access when purchase/library state changes for the same book.
+    LaunchedEffect(book.id, book.isPurchased, book.isFree, book.manuscriptPath, book.previewPath) {
         viewModel.prepareReader(book)
     }
 
