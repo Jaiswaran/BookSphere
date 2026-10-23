@@ -1200,28 +1200,6 @@ class BookSphereRepository(
                     totalPages = book.contentPages.size
                 )
             }
-            if (book.samplePages.isNotEmpty()) {
-                val pagesText = formatSamplePagesToText(book.samplePages)
-                return@withContext ResolvedBookAccess(
-                    bookId = book.id,
-                    target = BookAccessTarget.EmbeddedPages(pagesText),
-                    isPreviewOnly = false,
-                    allowedPages = pagesText.size,
-                    totalPages = pagesText.size
-                )
-            }
-            if (context != null && isBundledSampleBook(book) && book.previewPath.isNullOrBlank()) {
-                val sampleFile = SamplePdfHelper.getOrCreateSamplePdf(context, book)
-                if (sampleFile.exists() && sampleFile.length() > 0L) {
-                    return@withContext ResolvedBookAccess(
-                        bookId = book.id,
-                        target = BookAccessTarget.LocalUri(sampleFile.absolutePath),
-                        isPreviewOnly = false,
-                        allowedPages = book.totalPages,
-                        totalPages = book.totalPages
-                    )
-                }
-            }
         } else {
             val previewCount = (if (book.previewPages > 0) book.previewPages else 3).coerceAtLeast(1)
             if (!book.previewPath.isNullOrBlank()) {
@@ -1269,45 +1247,11 @@ class BookSphereRepository(
                     totalPages = book.contentPages.size
                 )
             }
-            if (book.samplePages.isNotEmpty()) {
-                val pagesText = formatSamplePagesToText(book.samplePages).take(previewCount)
-                return@withContext ResolvedBookAccess(
-                    bookId = book.id,
-                    target = BookAccessTarget.EmbeddedPages(pagesText),
-                    isPreviewOnly = true,
-                    allowedPages = pagesText.size,
-                    totalPages = book.samplePages.size
-                )
-            }
-            if (context != null && isBundledSampleBook(book)) {
-                val sampleFile = SamplePdfHelper.getOrCreateSamplePdf(context, book)
-                if (sampleFile.exists() && sampleFile.length() > 0L) {
-                    val openedPages = runCatching {
-                        ParcelFileDescriptor.open(sampleFile, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
-                            PdfRenderer(pfd).use { renderer -> renderer.pageCount }
-                        }
-                    }.getOrDefault(previewCount)
-                    return@withContext ResolvedBookAccess(
-                        bookId = book.id,
-                        target = BookAccessTarget.LocalUri(sampleFile.absolutePath),
-                        isPreviewOnly = true,
-                        allowedPages = minOf(openedPages, previewCount),
-                        totalPages = openedPages
-                    )
-                }
-            }
         }
 
         throw IllegalStateException(
             "No readable PDF or preview is available for '${book.title}'. Please refresh the catalog or ask the author to republish the book."
         )
-    }
-
-    private fun isBundledSampleBook(book: Book): Boolean {
-        return book.id == SampleData.sampleCelestialCartographer.id ||
-            book.id == SampleData.staffPickBook.id ||
-            SampleData.trendingBooks.any { it.id == book.id } ||
-            SampleData.libraryBooks.any { it.id == book.id }
     }
 
     private fun formatSamplePagesToText(samplePages: List<SamplePage>): List<String> {
