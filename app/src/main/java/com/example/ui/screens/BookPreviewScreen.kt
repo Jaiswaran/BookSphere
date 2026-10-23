@@ -61,11 +61,13 @@ fun BookPreviewScreen(
         } else if (book.samplePages.isNotEmpty()) {
             book.samplePages
         } else {
-            com.example.util.SamplePdfHelper.createDefaultSamplePages(book)
+            // Real uploaded manuscripts are previewed in ReaderScreen from the stored PDF.
+            // Do not fabricate page text for a remote book whose preview pages were not loaded.
+            emptyList()
         }
     }
 
-    val activePage = pages[currentPageIndex % pages.size]
+    val activePage = pages.getOrNull(currentPageIndex)
 
     Column(
         modifier = Modifier
@@ -101,7 +103,7 @@ fun BookPreviewScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = if (book.isFree) "Full Free Edition • ${book.totalPages} Pages" else "Sample Edition • 20 Pages Available",
+                            text = if (book.isFree) "Full Free Edition • ${book.totalPages} Pages" else "Sample Edition • ${book.previewPages} Pages Available",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.secondary
                         )
@@ -159,6 +161,47 @@ fun BookPreviewScreen(
                 )
             }
 
+            if (activePage == null) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.MenuBook,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Text(
+                            text = "Read the actual PDF preview",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            text = "BookSphere opens the author's uploaded PDF in the reader. No placeholder pages are shown here.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                        Button(
+                            onClick = { onReadBook(book) },
+                            shape = CircleShape
+                        ) {
+                            Icon(Icons.Outlined.AutoStories, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Open PDF Preview")
+                        }
+                    }
+                }
+            } else {
             // Realistic Tactile Parchment Book Paper Surface
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -333,6 +376,8 @@ fun BookPreviewScreen(
                     Spacer(modifier = Modifier.width(4.dp))
                     Icon(imageVector = Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
                 }
+            }
+
             }
 
             // Fair System Guarantee Banner
