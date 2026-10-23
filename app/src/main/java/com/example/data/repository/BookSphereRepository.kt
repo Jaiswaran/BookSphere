@@ -864,7 +864,6 @@ class BookSphereRepository(
                         data = coverBytes
                     ) {
                         upsert = true
-                        contentType = ContentType.Image.JPEG
                     }
                     uploadedFiles.add("covers" to coverStoragePath)
                     resolvedCoverUrl = supabase.storage.from("covers").publicUrl(coverStoragePath)
