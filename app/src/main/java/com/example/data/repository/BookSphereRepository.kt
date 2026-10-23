@@ -1081,7 +1081,8 @@ class BookSphereRepository(
     }
 
     private fun dtoToBook(dto: BookDto): Book {
-        // Never substitute a demo cover for a real catalog entry: missing covers stay neutral/blank.\n        val coverUrl = resolveStorageUrl("covers", dto.coverPath).orEmpty()
+        // Never substitute a demo cover for a real catalog entry: missing covers stay neutral/blank.
+        val coverUrl = resolveStorageUrl("covers", dto.coverPath).orEmpty()
         return Book(
             id = dto.id,
             title = dto.title,
