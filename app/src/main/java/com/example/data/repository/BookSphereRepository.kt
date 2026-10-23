@@ -23,13 +23,11 @@ import com.example.model.DataState
 import com.example.model.PublicationStage
 import com.example.model.ReadingList
 import com.example.model.ResolvedBookAccess
-import com.example.model.SamplePage
 import com.example.model.UserProfile
 import com.example.model.UserRole
 import com.example.util.AppError
 import com.example.util.AppLogger
 import com.example.util.PublicationValidator
-import com.example.util.SamplePdfHelper
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.Google
@@ -1254,26 +1252,5 @@ class BookSphereRepository(
         )
     }
 
-    private fun formatSamplePagesToText(samplePages: List<SamplePage>): List<String> {
-        return samplePages.map { sp ->
-            buildString {
-                appendLine(sp.chapterTitle)
-                appendLine()
-                if (sp.dropCapLetter.isNotBlank()) {
-                    append(sp.dropCapLetter)
-                    append(sp.firstSentenceRemainder)
-                    appendLine()
-                    appendLine()
-                }
-                sp.paragraphs.forEach { p ->
-                    appendLine(p)
-                    appendLine()
-                }
-                sp.footnote?.let { fn ->
-                    appendLine("---")
-                    appendLine(fn)
-                }
-            }
-        }
-    }
+
 }
