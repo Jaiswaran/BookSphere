@@ -42,7 +42,7 @@ fun BookPreviewScreen(
     onBuyNow: (Book) -> Unit,
     onReadBook: (Book) -> Unit = {}
 ) {
-    var currentPageIndex by remember { mutableIntStateOf(0) }
+    var currentPageIndex by remember(book.id) { mutableIntStateOf(0) }
     
     val pages = remember(book) {
         if (book.contentPages.isNotEmpty()) {
