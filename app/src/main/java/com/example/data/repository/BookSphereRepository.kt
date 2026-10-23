@@ -1,5 +1,7 @@
 package com.example.data.repository
 
+import io.ktor.http.ContentType
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -864,6 +866,7 @@ class BookSphereRepository(
                         data = coverBytes
                     ) {
                         upsert = true
+                        contentType = ContentType.Image.JPEG
                     }
                     uploadedFiles.add("covers" to coverStoragePath)
                     resolvedCoverUrl = supabase.storage.from("covers").publicUrl(coverStoragePath)
@@ -889,6 +892,7 @@ class BookSphereRepository(
                     data = manuscriptBytes
                 ) {
                     upsert = true
+                    contentType = ContentType.Application.Pdf
                 }
                 uploadedFiles.add("manuscripts" to manuscriptStoragePath)
                 AppLogger.d("BookSphereRepo", "Manuscript uploaded: $fullManuscriptPath")
@@ -922,6 +926,7 @@ class BookSphereRepository(
                     data = previewBytes
                 ) {
                     upsert = true
+                    contentType = ContentType.Application.Pdf
                 }
                 uploadedFiles.add("previews" to previewStoragePath)
                 AppLogger.d("BookSphereRepo", "Preview uploaded: previews/$previewStoragePath")
@@ -1057,9 +1062,11 @@ class BookSphereRepository(
                 page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                 page.close()
 
-                val pageInfo = PdfDocument.PageInfo.Builder(595, 842, i + 1).create()
+                // Preserve each source page's aspect ratio in the generated preview.
+                // Stretching every page to A4 distorted landscape and non-standard PDFs.
+                val pageInfo = PdfDocument.PageInfo.Builder(targetWidth, targetHeight, i + 1).create()
                 val docPage = pdfDoc.startPage(pageInfo)
-                val destRect = android.graphics.Rect(0, 0, 595, 842)
+                val destRect = android.graphics.Rect(0, 0, targetWidth, targetHeight)
                 docPage.canvas.drawBitmap(bitmap, null, destRect, null)
                 pdfDoc.finishPage(docPage)
 
