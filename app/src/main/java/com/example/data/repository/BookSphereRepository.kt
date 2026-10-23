@@ -76,7 +76,7 @@ class BookSphereRepository(
                     id = cached.id,
                     name = cached.name ?: "User",
                     email = cached.email ?: "",
-                    role = if (cached.role.equals("AUTHOR", ignoreCase = true)) UserRole.AUTHOR else UserRole.READER,
+                    role = if (cached.role.equals("AUTHOR", ignoreCase = true) || cached.role.equals("AUTHOR_VERIFIED", ignoreCase = true) || cached.role.equals("ADMIN", ignoreCase = true)) UserRole.AUTHOR else UserRole.READER,
                     photoUrl = cached.photoUrl,
                     bio = cached.bio ?: "Passionate literary enthusiast, avid reader of speculative fiction & philosophy.",
                     readingLists = if (parsedLists.isNotEmpty()) parsedLists else createDefaultReadingLists()
@@ -331,7 +331,7 @@ class BookSphereRepository(
 
             val finalProfile = profile ?: run {
                 val roleStr = user.userMetadata?.get("role")?.toString()?.trim('"') ?: "READER"
-                val role = if (roleStr.equals("AUTHOR", ignoreCase = true)) UserRole.AUTHOR else UserRole.READER
+                val role = if (roleStr.equals("AUTHOR", ignoreCase = true) || roleStr.equals("AUTHOR_VERIFIED", ignoreCase = true) || roleStr.equals("ADMIN", ignoreCase = true)) UserRole.AUTHOR else UserRole.READER
                 val displayName = user.userMetadata?.get("name")?.toString()?.trim('"')
                     ?: user.userMetadata?.get("full_name")?.toString()?.trim('"')
                     ?: normalizedEmail.substringBefore("@")
@@ -519,6 +519,7 @@ class BookSphereRepository(
             val cachedLists = if (cached?.id == userId) parseReadingListsJson(cached.readingListsJson) else emptyList()
 
             val isAuthorRole = it.role.equals("AUTHOR", ignoreCase = true) ||
+                    it.role.equals("AUTHOR_VERIFIED", ignoreCase = true) ||
                     it.role.equals("ADMIN", ignoreCase = true)
             UserProfile(
                 id = it.id,
