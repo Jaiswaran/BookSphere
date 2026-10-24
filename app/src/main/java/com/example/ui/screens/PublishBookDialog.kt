@@ -115,6 +115,13 @@ fun PublishBookDialog(
             coroutineScope.launch {
                 isProcessing = true
                 errorMessage = null
+                // Clear the previous selection first so an invalid replacement can never
+                // accidentally publish an older PDF while displaying an error for the new one.
+                pdfUri = null
+                pdfFileName = null
+                pdfFileSize = null
+                pdfTotalPages = 0
+                isUsingPresetManuscript = false
                 try {
                     var sizeBytes = 0L
                     var displayName: String? = null
@@ -144,6 +151,14 @@ fun PublishBookDialog(
                     if (!internalFile.exists() || internalFile.length() == 0L) {
                         errorMessage = "Selected PDF file is empty (0 bytes)."
                         try { internalFile.delete() } catch (_: Exception) {}
+                        return@launch
+                    }
+
+                    // Some document providers report an unknown size (-1). Always enforce
+                    // the limit against the copied file too, not only provider metadata.
+                    if (internalFile.length() > com.example.util.PublicationValidator.MAX_PDF_SIZE_BYTES) {
+                        try { internalFile.delete() } catch (_: Exception) {}
+                        errorMessage = "Manuscript exceeds maximum allowed size of 50 MB."
                         return@launch
                     }
                     

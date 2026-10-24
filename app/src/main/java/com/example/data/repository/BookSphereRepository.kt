@@ -1,5 +1,7 @@
 package com.example.data.repository
 
+import io.ktor.http.ContentType
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -21,13 +23,11 @@ import com.example.model.DataState
 import com.example.model.PublicationStage
 import com.example.model.ReadingList
 import com.example.model.ResolvedBookAccess
-import com.example.model.SamplePage
 import com.example.model.UserProfile
 import com.example.model.UserRole
 import com.example.util.AppError
 import com.example.util.AppLogger
 import com.example.util.PublicationValidator
-import com.example.util.SamplePdfHelper
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.Google
@@ -74,7 +74,7 @@ class BookSphereRepository(
                     id = cached.id,
                     name = cached.name ?: "User",
                     email = cached.email ?: "",
-                    role = if (cached.role.equals("AUTHOR", ignoreCase = true)) UserRole.AUTHOR else UserRole.READER,
+                    role = if (cached.role.equals("AUTHOR", ignoreCase = true) || cached.role.equals("AUTHOR_VERIFIED", ignoreCase = true) || cached.role.equals("ADMIN", ignoreCase = true)) UserRole.AUTHOR else UserRole.READER,
                     photoUrl = cached.photoUrl,
                     bio = cached.bio ?: "Passionate literary enthusiast, avid reader of speculative fiction & philosophy.",
                     readingLists = if (parsedLists.isNotEmpty()) parsedLists else createDefaultReadingLists()
@@ -329,7 +329,7 @@ class BookSphereRepository(
 
             val finalProfile = profile ?: run {
                 val roleStr = user.userMetadata?.get("role")?.toString()?.trim('"') ?: "READER"
-                val role = if (roleStr.equals("AUTHOR", ignoreCase = true)) UserRole.AUTHOR else UserRole.READER
+                val role = if (roleStr.equals("AUTHOR", ignoreCase = true) || roleStr.equals("AUTHOR_VERIFIED", ignoreCase = true) || roleStr.equals("ADMIN", ignoreCase = true)) UserRole.AUTHOR else UserRole.READER
                 val displayName = user.userMetadata?.get("name")?.toString()?.trim('"')
                     ?: user.userMetadata?.get("full_name")?.toString()?.trim('"')
                     ?: normalizedEmail.substringBefore("@")
@@ -517,6 +517,7 @@ class BookSphereRepository(
             val cachedLists = if (cached?.id == userId) parseReadingListsJson(cached.readingListsJson) else emptyList()
 
             val isAuthorRole = it.role.equals("AUTHOR", ignoreCase = true) ||
+                    it.role.equals("AUTHOR_VERIFIED", ignoreCase = true) ||
                     it.role.equals("ADMIN", ignoreCase = true)
             UserProfile(
                 id = it.id,
@@ -807,12 +808,11 @@ class BookSphereRepository(
             currentUserId = userId
 
             val profile = loadProfileFromPostgres(userId) ?: _currentProfile.value
-                ?: throw IllegalStateException("Could not verify author profile.")
+                ?: throw IllegalStateException("Could not verify your user profile.")
 
-            if (profile.role != UserRole.AUTHOR) {
-                throw IllegalStateException("Permission Denied: Only verified Authors can publish books.")
-            }
-
+            // The current publishing migration intentionally permits any authenticated user
+            // to publish. Database RLS and storage policies restrict every record/object to
+            // the signed-in user's own book ID and storage folder.
             val authorName = author.trim().ifBlank { profile.name }
             val finalPrice = if (isFree) 0.0 else price
 
@@ -889,6 +889,7 @@ class BookSphereRepository(
                     data = manuscriptBytes
                 ) {
                     upsert = true
+                    contentType = ContentType.Application.Pdf
                 }
                 uploadedFiles.add("manuscripts" to manuscriptStoragePath)
                 AppLogger.d("BookSphereRepo", "Manuscript uploaded: $fullManuscriptPath")
@@ -922,6 +923,7 @@ class BookSphereRepository(
                     data = previewBytes
                 ) {
                     upsert = true
+                    contentType = ContentType.Application.Pdf
                 }
                 uploadedFiles.add("previews" to previewStoragePath)
                 AppLogger.d("BookSphereRepo", "Preview uploaded: previews/$previewStoragePath")
@@ -1057,9 +1059,11 @@ class BookSphereRepository(
                 page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                 page.close()
 
-                val pageInfo = PdfDocument.PageInfo.Builder(595, 842, i + 1).create()
+                // Preserve each source page's aspect ratio in the generated preview.
+                // Stretching every page to A4 distorted landscape and non-standard PDFs.
+                val pageInfo = PdfDocument.PageInfo.Builder(targetWidth, targetHeight, i + 1).create()
                 val docPage = pdfDoc.startPage(pageInfo)
-                val destRect = android.graphics.Rect(0, 0, 595, 842)
+                val destRect = android.graphics.Rect(0, 0, targetWidth, targetHeight)
                 docPage.canvas.drawBitmap(bitmap, null, destRect, null)
                 pdfDoc.finishPage(docPage)
 
@@ -1193,28 +1197,6 @@ class BookSphereRepository(
                     totalPages = book.contentPages.size
                 )
             }
-            if (book.samplePages.isNotEmpty()) {
-                val pagesText = formatSamplePagesToText(book.samplePages)
-                return@withContext ResolvedBookAccess(
-                    bookId = book.id,
-                    target = BookAccessTarget.EmbeddedPages(pagesText),
-                    isPreviewOnly = false,
-                    allowedPages = pagesText.size,
-                    totalPages = pagesText.size
-                )
-            }
-            if (context != null && isBundledSampleBook(book) && book.previewPath.isNullOrBlank()) {
-                val sampleFile = SamplePdfHelper.getOrCreateSamplePdf(context, book)
-                if (sampleFile.exists() && sampleFile.length() > 0L) {
-                    return@withContext ResolvedBookAccess(
-                        bookId = book.id,
-                        target = BookAccessTarget.LocalUri(sampleFile.absolutePath),
-                        isPreviewOnly = false,
-                        allowedPages = book.totalPages,
-                        totalPages = book.totalPages
-                    )
-                }
-            }
         } else {
             val previewCount = (if (book.previewPages > 0) book.previewPages else 3).coerceAtLeast(1)
             if (!book.previewPath.isNullOrBlank()) {
@@ -1262,33 +1244,6 @@ class BookSphereRepository(
                     totalPages = book.contentPages.size
                 )
             }
-            if (book.samplePages.isNotEmpty()) {
-                val pagesText = formatSamplePagesToText(book.samplePages).take(previewCount)
-                return@withContext ResolvedBookAccess(
-                    bookId = book.id,
-                    target = BookAccessTarget.EmbeddedPages(pagesText),
-                    isPreviewOnly = true,
-                    allowedPages = pagesText.size,
-                    totalPages = book.samplePages.size
-                )
-            }
-            if (context != null && isBundledSampleBook(book)) {
-                val sampleFile = SamplePdfHelper.getOrCreateSamplePdf(context, book)
-                if (sampleFile.exists() && sampleFile.length() > 0L) {
-                    val openedPages = runCatching {
-                        ParcelFileDescriptor.open(sampleFile, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
-                            PdfRenderer(pfd).use { renderer -> renderer.pageCount }
-                        }
-                    }.getOrDefault(previewCount)
-                    return@withContext ResolvedBookAccess(
-                        bookId = book.id,
-                        target = BookAccessTarget.LocalUri(sampleFile.absolutePath),
-                        isPreviewOnly = true,
-                        allowedPages = minOf(openedPages, previewCount),
-                        totalPages = openedPages
-                    )
-                }
-            }
         }
 
         throw IllegalStateException(
@@ -1296,33 +1251,5 @@ class BookSphereRepository(
         )
     }
 
-    private fun isBundledSampleBook(book: Book): Boolean {
-        return book.id == SampleData.sampleCelestialCartographer.id ||
-            book.id == SampleData.staffPickBook.id ||
-            SampleData.trendingBooks.any { it.id == book.id } ||
-            SampleData.libraryBooks.any { it.id == book.id }
-    }
 
-    private fun formatSamplePagesToText(samplePages: List<SamplePage>): List<String> {
-        return samplePages.map { sp ->
-            buildString {
-                appendLine(sp.chapterTitle)
-                appendLine()
-                if (sp.dropCapLetter.isNotBlank()) {
-                    append(sp.dropCapLetter)
-                    append(sp.firstSentenceRemainder)
-                    appendLine()
-                    appendLine()
-                }
-                sp.paragraphs.forEach { p ->
-                    appendLine(p)
-                    appendLine()
-                }
-                sp.footnote?.let { fn ->
-                    appendLine("---")
-                    appendLine(fn)
-                }
-            }
-        }
-    }
 }
