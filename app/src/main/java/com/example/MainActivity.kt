@@ -101,7 +101,10 @@ fun BookSphereApp(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
-            if (currentTab != ScreenTab.BOOK_DETAIL && currentTab != ScreenTab.PROFILE) {
+            if (currentTab != ScreenTab.BOOK_DETAIL &&
+                currentTab != ScreenTab.PROFILE &&
+                currentTab != ScreenTab.READER
+            ) {
                 TopNavBar(
                     userRole = userRole,
                     currentProfile = currentProfile,
@@ -115,12 +118,14 @@ fun BookSphereApp(
             }
         },
         bottomBar = {
-            BottomNavBar(
-                currentTab = currentTab,
-                onTabSelected = { tab ->
-                    viewModel.setTab(tab)
-                }
-            )
+            if (currentTab != ScreenTab.READER) {
+                BottomNavBar(
+                    currentTab = currentTab,
+                    onTabSelected = { tab ->
+                        viewModel.setTab(tab)
+                    }
+                )
+            }
         },
         containerColor = MaterialTheme.colorScheme.surface
     ) { innerPadding ->

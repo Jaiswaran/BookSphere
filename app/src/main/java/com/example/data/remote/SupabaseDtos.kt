@@ -2,6 +2,16 @@ package com.example.data.remote
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+
+fun currentIsoTimestamp(): String {
+    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+    sdf.timeZone = TimeZone.getTimeZone("UTC")
+    return sdf.format(Date())
+}
 
 @Serializable
 data class ProfileDto(
@@ -9,7 +19,10 @@ data class ProfileDto(
     val name: String? = null,
     val email: String? = null,
     val role: String? = "READER",
+    @SerialName("author_status") val authorStatus: String? = null,
     @SerialName("photo_url") val photoUrl: String? = null,
+    val bio: String? = null,
+    @SerialName("reading_lists_json") val readingListsJson: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null
 )
@@ -18,7 +31,9 @@ data class ProfileDto(
 data class ProfileUpdateDto(
     val name: String? = null,
     @SerialName("photo_url") val photoUrl: String? = null,
-    @SerialName("updated_at") val updatedAt: String? = null
+    val bio: String? = null,
+    @SerialName("reading_lists_json") val readingListsJson: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = currentIsoTimestamp()
 )
 
 @Serializable
@@ -41,17 +56,17 @@ data class BookDto(
     val status: String = "PUBLISHED",
     val rating: Double = 5.0,
     @SerialName("copies_sold") val copiesSold: Int = 0,
-    @SerialName("created_at") val createdAt: String? = null,
-    @SerialName("updated_at") val updatedAt: String? = null
+    @SerialName("created_at") val createdAt: String? = currentIsoTimestamp(),
+    @SerialName("updated_at") val updatedAt: String? = currentIsoTimestamp()
 )
 
 @Serializable
 data class LibraryDto(
     @SerialName("user_id") val userId: String,
     @SerialName("book_id") val bookId: String,
-    @SerialName("purchased_at") val purchasedAt: String? = null,
+    @SerialName("purchased_at") val purchasedAt: String? = currentIsoTimestamp(),
     val progress: Double = 0.0,
     @SerialName("last_page") val lastPage: Int = 1,
     val completed: Boolean = false,
-    @SerialName("updated_at") val updatedAt: String? = null
+    @SerialName("updated_at") val updatedAt: String? = currentIsoTimestamp()
 )
