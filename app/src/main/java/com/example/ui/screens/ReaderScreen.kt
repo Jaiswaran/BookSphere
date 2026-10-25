@@ -255,11 +255,25 @@ fun ReaderScreen(
             val readablePages = state.readablePages
             val totalPagerPages = if (isPreviewMode) readablePages + 1 else readablePages
 
-            val pagerState = rememberPagerState(pageCount = { totalPagerPages })
+            val initialPageIndex = (state.initialPage - 1).coerceAtLeast(0).coerceAtMost((totalPagerPages - 1).coerceAtLeast(0))
+            val pagerState = rememberPagerState(initialPage = initialPageIndex, pageCount = { totalPagerPages })
             val focusRequester = remember { FocusRequester() }
 
             LaunchedEffect(Unit) {
                 focusRequester.requestFocus()
+            }
+
+            LaunchedEffect(pagerState.currentPage) {
+                val pageNumber = pagerState.currentPage + 1
+                if (!isPreviewMode || pageNumber <= readablePages) {
+                    val isDone = pageNumber >= state.totalDocPages
+                    viewModel.updateReadingProgress(
+                        book = book,
+                        lastPage = pageNumber,
+                        totalPages = state.totalDocPages,
+                        completed = isDone
+                    )
+                }
             }
 
             LaunchedEffect(pagerState.currentPage, state.sourceKey) {

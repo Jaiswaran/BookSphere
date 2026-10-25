@@ -23,10 +23,16 @@ import java.util.UUID
 class BookSphereViewModel(application: Application) : AndroidViewModel(application) {
 
     private val database = AppDatabase.getDatabase(application)
+    private val readingProgressDataStore = com.example.data.local.ReadingProgressDataStore(application)
     private val repository = BookSphereRepository(
         bookDao = database.bookDao(),
-        profileDao = database.cachedUserProfileDao()
+        profileDao = database.cachedUserProfileDao(),
+        readingProgressDataStore = readingProgressDataStore
     )
+
+    val allReadingProgress: StateFlow<Map<String, com.example.data.local.ReadingProgressInfo>> = repository
+        .getAllReadingProgressFromDataStore()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     // Current Supabase user profile
     val currentProfile: StateFlow<UserProfile?> = repository.currentProfile
@@ -92,7 +98,9 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
             val readablePages: Int,
             val totalDocPages: Int,
             val sourceKey: String?,
-            val embeddedPages: List<String> = emptyList()
+            val embeddedPages: List<String> = emptyList(),
+            val initialPage: Int = 1,
+            val chapter: String? = null
         ) : ReaderUiState
         data class Error(val error: AppError, val canRetry: Boolean = true) : ReaderUiState
     }
@@ -723,10 +731,10 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun updateReadingProgress(book: Book, lastPage: Int, totalPages: Int, completed: Boolean) {
-        val profile = currentProfile.value ?: return
+    fun updateReadingProgress(book: Book, lastPage: Int, totalPages: Int, completed: Boolean, chapter: String? = null) {
+        val profileId = currentProfile.value?.id ?: "guest_user"
         viewModelScope.launch {
-            repository.updateReadingProgress(profile.id, book.id, lastPage, totalPages, completed)
+            repository.updateReadingProgress(profileId, book.id, lastPage, totalPages, completed, chapter)
         }
     }
 
@@ -741,6 +749,8 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
             try {
                 val profile = currentProfile.value
                 val access = repository.resolveBookAccess(book, profile?.id, getApplication())
+                val savedProgress = repository.getReadingProgressInfoFromDataStore(book.id).firstOrNull() ?: com.example.data.local.ReadingProgressInfo()
+                val savedPage = savedProgress.page.coerceAtLeast(1)
 
                 when (val target = access.target) {
                     is BookAccessTarget.RemoteStorageUrl -> {
@@ -756,12 +766,15 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
                             } else {
                                 totalPages
                             }
+                            val initialPage = savedPage.coerceAtMost(readablePages)
                             _readerUiState.value = ReaderUiState.Success(
                                 book = book,
                                 isPreview = access.isPreviewOnly,
                                 readablePages = readablePages.coerceAtLeast(1),
                                 totalDocPages = totalPages,
-                                sourceKey = target.url
+                                sourceKey = target.url,
+                                initialPage = initialPage,
+                                chapter = savedProgress.chapter
                             )
                         } else {
                             val cause = totalPagesRes.exceptionOrNull()
@@ -786,12 +799,15 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
                             } else {
                                 totalPages
                             }
+                            val initialPage = savedPage.coerceAtMost(readablePages)
                             _readerUiState.value = ReaderUiState.Success(
                                 book = book,
                                 isPreview = access.isPreviewOnly,
                                 readablePages = readablePages.coerceAtLeast(1),
                                 totalDocPages = totalPages,
-                                sourceKey = target.uriString
+                                sourceKey = target.uriString,
+                                initialPage = initialPage,
+                                chapter = savedProgress.chapter
                             )
                         } else {
                             val cause = totalPagesRes.exceptionOrNull()
@@ -805,13 +821,16 @@ class BookSphereViewModel(application: Application) : AndroidViewModel(applicati
                         } else {
                             target.pages.size
                         }
+                        val initialPage = savedPage.coerceAtMost(readablePages)
                         _readerUiState.value = ReaderUiState.Success(
                             book = book,
                             isPreview = access.isPreviewOnly,
                             readablePages = readablePages.coerceAtLeast(1),
                             totalDocPages = access.totalPages,
                             sourceKey = null,
-                            embeddedPages = target.pages
+                            embeddedPages = target.pages,
+                            initialPage = initialPage,
+                            chapter = savedProgress.chapter
                         )
                     }
                 }

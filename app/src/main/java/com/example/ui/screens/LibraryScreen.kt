@@ -27,6 +27,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.data.local.ReadingProgressInfo
 import com.example.model.Book
 import com.example.ui.components.bookSpineEffect
 
@@ -34,6 +35,7 @@ import com.example.ui.components.bookSpineEffect
 fun LibraryScreen(
     currentVolume: Book,
     libraryBooks: List<Book>,
+    readingProgressMap: Map<String, ReadingProgressInfo> = emptyMap(),
     onOpenBook: (Book) -> Unit
 ) {
     var selectedFilter by remember { mutableStateOf("All Books") }
@@ -272,18 +274,24 @@ fun LibraryScreen(
                                 )
                             }
                         }
+                        val currentVolProgress = readingProgressMap[currentVolume.id]
+                        val displayPage = currentVolProgress?.page ?: 1
+                        val displayTotalPages = if (currentVolProgress != null && currentVolProgress.totalPages > 0) currentVolProgress.totalPages else currentVolume.totalPages
+                        val displayPct = if (displayTotalPages > 0) ((displayPage.toFloat() / displayTotalPages.toFloat()) * 100).toInt().coerceIn(0, 100) else 0
+                        val displayFraction = if (displayTotalPages > 0) (displayPage.toFloat() / displayTotalPages.toFloat()).coerceIn(0f, 1f) else 0.52f
+
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = currentVolume.progressText ?: "52% finished",
+                                    text = "$displayPct% finished",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )
                                 Text(
-                                    text = "p. 158 / ${currentVolume.totalPages}",
+                                    text = "p. $displayPage / $displayTotalPages",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -297,7 +305,7 @@ fun LibraryScreen(
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxWidth(currentVolume.progress ?: 0.52f)
+                                        .fillMaxWidth(displayFraction)
                                         .fillMaxHeight()
                                         .background(
                                             brush = Brush.horizontalGradient(
@@ -373,11 +381,19 @@ fun LibraryScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Box(modifier = Modifier.weight(1f)) {
-                        LibraryBookCard(book = libraryBooks[i], onClick = { onOpenBook(libraryBooks[i]) })
+                        LibraryBookCard(
+                            book = libraryBooks[i],
+                            progressInfo = readingProgressMap[libraryBooks[i].id],
+                            onClick = { onOpenBook(libraryBooks[i]) }
+                        )
                     }
                     Box(modifier = Modifier.weight(1f)) {
                         if (i + 1 < libraryBooks.size) {
-                            LibraryBookCard(book = libraryBooks[i + 1], onClick = { onOpenBook(libraryBooks[i + 1]) })
+                            LibraryBookCard(
+                                book = libraryBooks[i + 1],
+                                progressInfo = readingProgressMap[libraryBooks[i + 1].id],
+                                onClick = { onOpenBook(libraryBooks[i + 1]) }
+                            )
                         }
                     }
                 }
@@ -455,7 +471,25 @@ fun LibraryScreen(
 }
 
 @Composable
-fun LibraryBookCard(book: Book, onClick: () -> Unit) {
+fun LibraryBookCard(
+    book: Book,
+    progressInfo: ReadingProgressInfo? = null,
+    onClick: () -> Unit
+) {
+    val hasDataStoreProgress = progressInfo != null && progressInfo.lastReadTimestamp > 0
+    val displayPage = if (hasDataStoreProgress) progressInfo.page else 0
+    val displayTotal = if (hasDataStoreProgress && progressInfo.totalPages > 0) progressInfo.totalPages else book.totalPages
+    val displayProgressFraction = if (hasDataStoreProgress && displayTotal > 0) {
+        (displayPage.toFloat() / displayTotal.toFloat()).coerceIn(0f, 1f)
+    } else {
+        book.progress ?: 0f
+    }
+    val displayProgressText = if (hasDataStoreProgress) {
+        "p. $displayPage / $displayTotal"
+    } else {
+        book.progressText ?: ""
+    }
+
     Column(modifier = Modifier.clickable { onClick() }) {
         Box(
             modifier = Modifier
@@ -499,7 +533,7 @@ fun LibraryBookCard(book: Book, onClick: () -> Unit) {
                         )
                     }
                 }
-            } else if (book.badgeType == "new") {
+            } else if (book.badgeType == "new" && !hasDataStoreProgress) {
                 Surface(
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -543,7 +577,7 @@ fun LibraryBookCard(book: Book, onClick: () -> Unit) {
             }
 
             // Progress bar Bottom
-            if (book.progress != null) {
+            if (hasDataStoreProgress || book.progress != null) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -557,12 +591,12 @@ fun LibraryBookCard(book: Book, onClick: () -> Unit) {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = book.progressText ?: "",
+                                text = displayProgressText,
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
                                 color = Color.White
                             )
                             Text(
-                                text = book.timeLeft ?: "",
+                                text = if (hasDataStoreProgress) "${(displayProgressFraction * 100).toInt()}%" else (book.timeLeft ?: ""),
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
                                 color = Color.White
                             )
@@ -576,7 +610,7 @@ fun LibraryBookCard(book: Book, onClick: () -> Unit) {
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth(book.progress)
+                                    .fillMaxWidth(displayProgressFraction)
                                     .fillMaxHeight()
                                     .background(MaterialTheme.colorScheme.secondary)
                             )

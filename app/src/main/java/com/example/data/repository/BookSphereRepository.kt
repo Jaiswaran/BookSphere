@@ -10,21 +10,9 @@ import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import com.example.data.SampleData
-import com.example.data.local.BookDao
-import com.example.data.local.BookEntity
-import com.example.data.local.CachedUserProfileDao
-import com.example.data.local.CachedUserProfileEntity
-import com.example.data.local.toBookEntity
+import com.example.data.local.*
 import com.example.data.remote.*
-import com.example.model.Book
-import com.example.model.BookAccessTarget
-import com.example.model.BookStatus
-import com.example.model.DataState
-import com.example.model.PublicationStage
-import com.example.model.ReadingList
-import com.example.model.ResolvedBookAccess
-import com.example.model.UserProfile
-import com.example.model.UserRole
+import com.example.model.*
 import com.example.util.AppError
 import com.example.util.AppLogger
 import com.example.util.PublicationValidator
@@ -55,6 +43,7 @@ import java.util.UUID
 class BookSphereRepository(
     private val bookDao: BookDao,
     private val profileDao: CachedUserProfileDao,
+    private val readingProgressDataStore: ReadingProgressDataStore? = null,
     private val supabase: SupabaseClient = SupabaseConfig.client
 ) {
     // Room Cache Flows
@@ -700,13 +689,40 @@ class BookSphereRepository(
         }
     }
 
+    // ==========================================
+    // DATASTORE READING PROGRESS TRACKING
+    // ==========================================
+
+    fun getLastReadPageFromDataStore(bookId: String): Flow<Int> {
+        return readingProgressDataStore?.getLastReadPage(bookId) ?: flowOf(1)
+    }
+
+    fun getReadingProgressInfoFromDataStore(bookId: String): Flow<ReadingProgressInfo> {
+        return readingProgressDataStore?.getReadingProgressInfo(bookId) ?: flowOf(ReadingProgressInfo())
+    }
+
+    fun getAllReadingProgressFromDataStore(): Flow<Map<String, ReadingProgressInfo>> {
+        return readingProgressDataStore?.getAllReadingProgress() ?: flowOf(emptyMap())
+    }
+
+    suspend fun saveReadingProgressToDataStore(
+        bookId: String,
+        page: Int,
+        chapter: String? = null,
+        totalPages: Int = 0
+    ) {
+        readingProgressDataStore?.saveReadingProgress(bookId, page, chapter, totalPages)
+    }
+
     suspend fun updateReadingProgress(
         userId: String,
         bookId: String,
         lastPage: Int,
         totalPages: Int,
-        completed: Boolean
+        completed: Boolean,
+        chapter: String? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
+        saveReadingProgressToDataStore(bookId, lastPage, chapter, totalPages)
         runCatching {
             val progress = if (totalPages > 0) (lastPage.toDouble() / totalPages.toDouble()).coerceIn(0.0, 1.0) else 0.0
             try {

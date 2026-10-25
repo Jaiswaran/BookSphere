@@ -44,6 +44,7 @@ fun BookSphereApp(
     val showSignUpDialog by viewModel.showSignUpDialog.collectAsStateWithLifecycle()
 
     val libraryBooks by viewModel.libraryBooks.collectAsStateWithLifecycle()
+    val allReadingProgress by viewModel.allReadingProgress.collectAsStateWithLifecycle()
     val authorStats by viewModel.authorStats.collectAsStateWithLifecycle()
     val authorWorks by viewModel.authorWorks.collectAsStateWithLifecycle()
     val platformMetrics by viewModel.platformMetrics.collectAsStateWithLifecycle()
@@ -164,6 +165,7 @@ fun BookSphereApp(
                     LibraryScreen(
                         currentVolume = SampleData.currentVolume,
                         libraryBooks = libraryBooks,
+                        readingProgressMap = allReadingProgress,
                         onOpenBook = { book ->
                             viewModel.setPreviewBook(book)
                             viewModel.setTab(ScreenTab.READER)
