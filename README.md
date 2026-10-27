@@ -1,190 +1,180 @@
-# BOOKSPHERE — Fair Literary Marketplace & Reading Platform
+# BookSphere 📚
 
-> **"A fair, direct marketplace connecting independent authors and readers with pricing autonomy and authentic 2-3 page tactile previews."**
+**BookSphere is an Android reading and publishing app that brings readers and independent authors together.** Readers can discover books, preview uploaded manuscripts, and continue reading; authors can publish their work and manage book details from the app.
 
----
+Repository: [Jaiswaran/BookSphere](https://github.com/Jaiswaran/BookSphere)
 
-## 1. Executive Summary & Business Model Canvas
+## What the app is for
 
-**BookSphere** challenges traditional publishing duopolies (where authors receive as little as 30% to 50% royalties and face opaque distribution penalties). BookSphere operates on a **70/30 Fair Equity Model**:
-- **70% Net Royalty** flows directly into the author's vault with real-time payout transparency.
-- **30% Flat Platform Fee** covers global low-latency CDN streaming, DRM-free storage, Stripe payment processing, and catalog indexing.
-- **"Try Before You Buy" Tactical Realistic Preview**: Readers freely stream the first 2-3 pages of any manuscript in an authentic, beautifully typeset dual-page book reader before deciding to purchase.
+BookSphere aims to make digital reading more approachable while giving authors a direct way to share their work. The project is built as a native Android application, with a local data layer for responsiveness and Supabase services for remote data and file storage.
 
-### Target Audience & User Personas
-1. **Authors & Sellers**: Independent authors, self-publishing novelists, and boutique presses who demand pricing sovereignty, instant reader resonance metrics, and transparent sales analytics.
-2. **Readers & Book Lovers**: Avid bibliophiles and students seeking discovery, reading progress tracking, community marginalia, and verified samples before buying.
+## Features
 
----
+Features represented in the current codebase include:
 
-## 2. Technical Architecture & Stack
+- **Book discovery and catalog UI** for browsing book details and sample content.
+- **Author Studio** for book publishing workflows.
+- **PDF-based manuscript workflow**, including upload and preview generation from uploaded PDF content.
+- **Preview and full-reading access rules** so preview access and full-manuscript access can be handled separately.
+- **Reader progress and local persistence** using Room and DataStore.
+- **Remote backend integration** with Supabase Postgres APIs, Authentication, and Storage.
+- **Google sign-in support components** through Android Credential Manager dependencies.
+- **Automated tests** covering repository behavior, publishing, discovery and previews, access entitlements, security policies, and stability.
 
-### Client Architecture (Android / Jetpack Compose)
-- **Framework**: Kotlin & Jetpack Compose (Declarative UI, Edge-to-Edge display).
-- **Design System**: Material Design 3 (M3) with custom literary typography pairings:
-  - **Editorial Serif (`Playfair Display` equivalent)** for headlines, chapter titles, and drop-caps.
-  - **Digital Sans-Serif (`Source Sans 3` equivalent)** for high-legibility UI, metrics, and navigation.
-  - **Tactile Parchment Canvas** (`#FAF7F0`) with spine simulation gradients, page gutters, and marginalia notes.
-- **State Management**: Reactive state flows managing book catalog, reading streaks, manuscript publishing, and transparent revenue calculations.
+> This README describes the implemented app structure and intended workflows. Payment processing, author payouts, and production DRM are not documented as implemented features unless they are added to the codebase.
 
-### Cloud Architecture & Backend Specification
-```
-[ Readers & Authors ]
-         │
-    (HTTPS / TLS)
-         ▼
-[ BookSphere API Gateway / Node.js & NestJS ]
-    ├── Auth & Role Service (JWT, Authors vs Readers)
-    ├── Catalog & Search Service (PostgreSQL + Full-Text Search)
-    ├── Fair Royalties Engine (70/30 automated Stripe Connect splits)
-    └── Streaming Manuscript Engine (AWS S3 Signed Partial Streams)
-```
+## Tech stack
 
-1. **Streaming Partial Previews (S3 & Byte-Range Delivery)**:
-   - Manuscripts (`.epub`, `.pdf`) are stored encrypted in AWS S3 buckets.
-   - For unpurchased books, the server issues byte-range restricted streams or extracts pages 1–3 on-the-fly, preventing unauthorized downloads while delivering instant previews.
-   - Upon purchase confirmation via Stripe Webhook, a signed temporary download URL and persistent library token are generated.
+| Area | Technology |
+| --- | --- |
+| Platform | Native Android |
+| Language | Kotlin |
+| UI | Jetpack Compose, Material 3 |
+| Build system | Gradle with Kotlin DSL and version catalog |
+| Remote backend | Supabase (Postgres/PostgREST, Auth, Storage) |
+| Local persistence | Room, DataStore |
+| Networking | Ktor / OkHttp-based dependencies |
+| Image loading | Coil |
+| Tests | JUnit, Robolectric, Android UI/instrumentation testing, Roborazzi |
 
-2. **Fair Payout Engine (Stripe Connect)**:
-   - Every transaction transparently calculates `author_share = price * 0.70` and `platform_fee = price * 0.30`.
-   - Payouts are deposited directly to the author's connected bank account.
+## Project structure
 
----
-
-## 3. Database Schema (PostgreSQL DDL)
-
-```sql
--- Users & Roles
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email VARCHAR(255) UNIQUE NOT NULL,
-    full_name VARCHAR(150) NOT NULL,
-    role VARCHAR(20) NOT NULL CHECK (role IN ('READER', 'AUTHOR', 'ADMIN')),
-    avatar_url TEXT,
-    stripe_account_id VARCHAR(100),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Books & Manuscripts
-CREATE TABLE books (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    author_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    title VARCHAR(255) NOT NULL,
-    genre VARCHAR(80) NOT NULL,
-    description TEXT,
-    retail_price NUMERIC(6, 2) NOT NULL CHECK (retail_price >= 0.99),
-    cover_url TEXT NOT NULL,
-    manuscript_s3_key TEXT NOT NULL,
-    preview_pages_count INT DEFAULT 20,
-    total_pages INT NOT NULL,
-    status VARCHAR(30) DEFAULT 'PUBLISHED',
-    rating NUMERIC(3, 2) DEFAULT 5.0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Sample Pages for Instant Streaming
-CREATE TABLE sample_pages (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-    page_number INT NOT NULL,
-    chapter_title VARCHAR(200),
-    drop_cap_letter CHAR(1),
-    content TEXT NOT NULL,
-    footnote TEXT,
-    margin_note TEXT
-);
-
--- Orders & Fair Revenue Splits
-CREATE TABLE orders (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    reader_id UUID NOT NULL REFERENCES users(id),
-    book_id UUID NOT NULL REFERENCES books(id),
-    amount NUMERIC(6, 2) NOT NULL,
-    author_payout NUMERIC(6, 2) NOT NULL, -- 70%
-    platform_fee NUMERIC(6, 2) NOT NULL,  -- 30%
-    stripe_payment_intent_id VARCHAR(120),
-    status VARCHAR(30) DEFAULT 'COMPLETED',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Reader Library & Progress
-CREATE TABLE user_library (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-    progress NUMERIC(4, 3) DEFAULT 0.0,
-    last_read_page INT DEFAULT 1,
-    is_completed BOOLEAN DEFAULT FALSE,
-    purchased_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(user_id, book_id)
-);
+```text
+BookSphere/
+├── app/
+│   ├── build.gradle.kts
+│   └── src/
+│       ├── main/
+│       │   ├── java/com/example/
+│       │   │   ├── data/
+│       │   │   │   ├── local/       # Room database, entities, DAOs, progress storage
+│       │   │   │   ├── remote/      # Supabase client and DTOs
+│       │   │   │   └── repository/  # Data and publishing workflows
+│       │   │   ├── model/           # App models and state types
+│       │   │   ├── ui/              # ViewModel, components and screens
+│       │   │   └── MainActivity.kt
+│       │   └── AndroidManifest.xml
+│       ├── test/                    # Unit and integration-style tests
+│       └── androidTest/             # Instrumentation tests
+├── gradle/
+│   └── libs.versions.toml           # Dependency version catalog
+├── supabase/
+│   └── migrations/                  # SQL migrations and RLS/storage policies
+├── .env.example                     # Example local configuration
+├── build.gradle.kts
+└── settings.gradle.kts
 ```
 
+## Requirements
+
+- Android Studio with support for the project's Gradle and Android Gradle Plugin versions
+- JDK version compatible with the Gradle project (JDK 17 is a good starting point; use the version required by your installed Android Gradle Plugin)
+- Android SDK for the project's configured compile SDK
+- A Supabase project for backend functionality
+
+## Getting started
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/Jaiswaran/BookSphere.git
+cd BookSphere
+```
+
+### 2. Open the project
+
+Open the repository folder in Android Studio and allow Gradle to sync. Use the included Gradle wrapper where available rather than installing a separate Gradle version.
+
+### 3. Configure Supabase
+
+The app reads Supabase settings through the Gradle Secrets plugin. Start by reviewing `.env.example`.
+
+Create a local `.env` file in the repository root (do not commit it) and set your project values:
+
+```properties
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SUPABASE_PUBLISHABLE_KEY=YOUR_SUPABASE_PUBLISHABLE_KEY
+WEB_CLIENT_ID=YOUR_GOOGLE_OAUTH_WEB_CLIENT_ID
+```
+
+- Use your own Supabase project URL and **publishable** key.
+- Configure the Google OAuth web client ID if you use Google sign-in.
+- Never place a Supabase service-role key or other server-side secret in the Android app.
+- Keep real credentials out of Git. The checked-in `.env.example` is a template, not a place for personal secrets.
+
+### 4. Configure the Supabase backend
+
+1. Create or select the Supabase project used by your app.
+2. Review the SQL files under `supabase/migrations/`.
+3. Apply the required migrations to the target project in order, using the Supabase SQL Editor or your normal migration workflow.
+4. Confirm that the relevant tables, Storage buckets, and Row Level Security (RLS) / Storage policies exist before testing publishing or uploads.
+
+In particular, the repository includes `20261023000000_fix_reader_book_publishing_storage_policies.sql`, which updates book-publishing and Storage policies. Apply the migration if it has not already been applied to your Supabase project.
+
+**Important:** The app's database schema and access policies must match the code. A successful Android build does not prove that remote authentication, database access, or PDF uploads are configured correctly.
+
+### 5. Build and run
+
+From the repository root, use the Gradle wrapper:
+
+**Windows (PowerShell):**
+```powershell
+.\gradlew.bat assembleDebug
+```
+
+**macOS / Linux:**
+```bash
+./gradlew assembleDebug
+```
+
+Open the project in Android Studio, select an emulator or connected Android device, and run the `app` configuration. If the wrapper script is not present in your checkout, use Android Studio's Gradle sync/build actions or restore the wrapper files for the project.
+
+## Running tests
+
+Run the local unit-test suite with:
+
+**Windows:**
+```powershell
+.\gradlew.bat :app:testDebugUnitTest
+```
+
+**macOS / Linux:**
+```bash
+./gradlew :app:testDebugUnitTest
+```
+
+For connected-device tests, use:
+
+```bash
+./gradlew :app:connectedDebugAndroidTest
+```
+
+The connected-device command requires a running emulator or a connected Android device. These commands are instructions; test results depend on your local environment and backend configuration.
+
+## Backend and data notes
+
+- **Supabase** is the remote backend for database, authentication, and object storage operations.
+- **Room** stores local app data, and **DataStore** is used for reading-progress-related persistence.
+- **RLS and Storage policies matter.** Do not disable them as a shortcut for production. Configure policies to grant only the access each reader or author needs.
+- PDF upload and preview flows depend on valid Storage permissions, supported file content, and the matching backend schema/policies.
+- Do not commit API secrets, signing keystores, passwords, or release credentials.
+
+## Continuous integration
+
+A GitHub Actions workflow is present at `.github/workflows/build-apk.yml`. Check that workflow for the exact build steps and required repository secrets before relying on it for CI or release builds.
+
+## Contributing
+
+1. Create a branch for your change.
+2. Keep changes focused and follow the existing Kotlin/Compose patterns.
+3. Add or update tests for changes to publishing, preview access, repository behavior, or security rules.
+4. Verify the relevant Gradle build and tests locally.
+5. Open a pull request with a clear summary and testing notes.
+
+## License
+
+A license file was not confirmed during this repository inspection. Add a `LICENSE` file and update this section before redistributing the project under a specific license.
+
 ---
 
-## 4. Social Authentication Architecture (Firebase Auth Providers)
-
-BookSphere supports social authentication using Firebase Authentication providers for friction-free onboarding while strictly preserving user roles (Author vs Reader):
-
-1. **Google Sign-In (`GoogleAuthProvider`)**:
-   - Client initializes Firebase `GoogleAuthProvider` with standard profile and email scopes.
-   - For web clients: `signInWithPopup(auth, googleProvider)`.
-   - For Android clients: Google Credential Manager or Firebase Auth SDK.
-   - Upon successful credential grant, the Firebase ID token is minted and validated by BookSphere's backend, linking the newly authenticated profile with the chosen persona (Reader or Author).
-
-2. **Apple Sign-In (`OAuthProvider("apple.com")`)**:
-   - Initialized via `OAuthProvider('apple.com')` requesting `email` and `name` scopes.
-   - Handles Apple Private Relay emails (`@privaterelay.appleid.com`) gracefully, ensuring transaction receipts and manuscript preview tokens are safely delivered.
-   - Fully compliant with Apple App Store Review Guideline 4.8 for social sign-in parity.
-
-3. **Role & Account Provisioning**:
-   - The selected registration role (`AUTHOR` or `READER`) is attached to the user's custom claims or stored in the database during first social login.
-
----
-
-## 5. Environment Setup & Execution
-
-### Prerequisites
-- Android Studio Ladybug / Jellyfish (or Gradle 8.x+)
-- JDK 17 or higher
-- Android SDK 34 / 35
-
-### Running the Project
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/booksphere/booksphere-android.git
-   cd booksphere-android
-   ```
-
-2. **Configure Environment Secrets**:
-   Copy `.env.example` to `.env` or configure the AI Studio Secrets panel:
-   ```properties
-   STRIPE_PUBLISHABLE_KEY=pk_test_sample
-   BOOKSPHERE_API_BASE_URL=https://api.booksphere.com/v1
-   ```
-
-3. **Build and Assemble the Debug APK**:
-   ```bash
-   gradle assembleDebug
-   ```
-
-4. **Run JVM & Screenshot Tests**:
-   ```bash
-   gradle :app:testDebugUnitTest
-   ```
-
----
-
-## 5. Key Metrics Tracked (Admin Dashboard)
-
-Accessible directly within the application top navigation bar:
-- **Total Books Listed**: 1,420 published works.
-- **Circulation & Sales**: 48,920 volumes unlocked.
-- **Active Community Ratio**: 1,240 verified authors to 28,450 active readers.
-- **Preview Conversion Rate**: 72% of readers who read the first 2-3 pages proceed to purchase.
-- **Fair Split Volume**: Over $243,440.00 distributed directly into creator bank accounts.
-
----
-
-## 6. License
-Distributed under the MIT License. Designed with craftsmanship for independent writers and passionate readers worldwide.
+Built to help readers discover books and give authors a practical way to share their work.
